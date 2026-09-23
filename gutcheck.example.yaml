@@ -4,10 +4,20 @@
 host: 127.0.0.1
 port: 8080
 log_level: info
+# api_key: change-me   # require Authorization: Bearer <key>
 
 engine:
   # cpu, cuda, cuda:0 ... leave unset to pick automatically
   device: cuda
-  # english, multilingual, typed-decisions
+  # loaded at startup: english, multilingual, typed-decisions
   models: [english, multilingual]
   max_loaded: 2
+
+# verdicts on the probability of the returned answer: act >= act_at, review >= review_at, else escalate
+policy:
+  act_at: 0.9
+  review_at: 0.6
+
+store:
+  path: gutcheck.db   # null disables the decision log
+  save_state: true    # keep the input text alongside each decision
