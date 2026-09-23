@@ -98,3 +98,14 @@ def test_read_records_parquet(tmp_path):
     path = tmp_path / "d.parquet"
     pq.write_table(pa.table({"text": ["hi"], "label": [1]}), path)
     assert evals.read_records(path) == [{"text": "hi", "label": 1}]
+
+
+def test_fetch_uses_cache_and_pinned_revision(tmp_path):
+    from gutcheck.packs import DatasetSpec
+
+    sha = "a" * 40
+    spec = DatasetSpec(repo="org/data", revision=sha, path="d.csv", license="MIT")
+    cached = tmp_path / "org/data" / sha / "d.csv"
+    cached.parent.mkdir(parents=True)
+    cached.write_text("x\n")
+    assert evals.fetch(spec, tmp_path, cache_dir=tmp_path) == (cached, sha)

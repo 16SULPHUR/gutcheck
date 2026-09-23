@@ -55,6 +55,9 @@ def fetch(
         target.write_bytes(data)
         commit_file.write_text(commit)
     commit = commit_file.read_text().strip() if commit_file.exists() else ""
+    # LFS files redirect to a CDN that drops X-Repo-Commit; a pinned SHA is the commit anyway
+    if not commit and len(spec.revision) == 40:
+        commit = spec.revision
     return target, commit or None
 
 

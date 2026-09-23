@@ -3,8 +3,8 @@ from collections.abc import Sequence
 from typing import Any
 
 _EPS = 1e-6
-# log-spaced 0.2 .. 5.0
-_GRID = [math.exp(math.log(0.2) + i * (math.log(5.0) - math.log(0.2)) / 60) for i in range(61)]
+# log-spaced 0.05 .. 20, centred on 1.0
+_GRID = [math.exp(math.log(0.05) + i * math.log(400) / 80) for i in range(81)]
 
 
 def distribution(answer: dict[str, Any]) -> list[float]:
