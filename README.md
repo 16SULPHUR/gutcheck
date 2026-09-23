@@ -11,8 +11,8 @@ each with a verdict on whether it is safe to act on.
    └─ needs_tool               none  0.41   → review
 ```
 
-> **Status: early development (M0).** The server starts and reports health. Decisions arrive in M1.
-> See the [roadmap](#roadmap).
+> **Status: early development (M1).** The gateway serves Laya decisions with verdicts and logs
+> them. Question packs and published evals arrive in M2. See the [roadmap](#roadmap).
 
 ## Why
 
@@ -58,6 +58,64 @@ pip install -e ".[dev]"
 gutcheck serve
 ```
 
+## API
+
+### `POST /v1/decide`
+
+Send a state (a string, JSON object or list of chat turns) and typed questions. Every answer comes
+back with the probability of the returned answer and a verdict: `act` at or above `act_at`,
+`review` at or above `review_at`, otherwise `escalate`. Thresholds come from the config
+(`policy`), can be overridden for the whole request, and again per question.
+
+```bash
+curl -s localhost:8080/v1/decide -H 'Content-Type: application/json' -d '{
+  "state": {"subject": "Duplicate charge on invoice #4411", "body": "We were billed twice."},
+  "policy": {"act_at": 0.85, "review_at": 0.6},
+  "questions": {
+    "department": {"type": "choice", "instructions": "Which department should handle this?",
+                   "criteria": {"billing": "invoices, refunds", "technical": "bugs, outages"}},
+    "refund": {"type": "noul", "instructions": "Does the customer ask for money back?",
+               "policy": {"act_at": 0.95, "review_at": 0.7}}
+  }
+}'
+```
+
+```json
+{
+  "trace_id": "gc_4f9c...",
+  "model": "english",
+  "answers": {
+    "department": {"type": "choice", "choice": "billing", "probabilities": {"billing": 0.91, "technical": 0.09},
+                   "confidence": 0.56, "answer_probability": 0.91, "verdict": "act"},
+    "refund": {"type": "noul", "noul": 0.82, "confidence": 0.82, "answer_probability": 0.82, "verdict": "review"}
+  },
+  "routing": {"model": "english", "reason": "English Latin text"},
+  "usage": {"input_tokens": 118, "output_tokens": 0},
+  "latency_ms": 41.3
+}
+```
+
+The numbers above are illustrative. Laya's base checkpoints are not calibrated for your task out
+of the box, so tune thresholds on your own data (tooling for that lands in M2 and M3).
+
+### `POST /v1/systemone`
+
+Drop-in compatible with TypeSafe's Jev API and `laya-serve`: the same request, and Laya's answers
+unchanged, with no verdicts. Existing clients only need their base URL changed:
+
+```python
+from typesafe_sdk import Noul, TypeSafeClient
+
+client = TypeSafeClient(api_key="unused", base_url="http://localhost:8080")
+client.system_one(
+    state="I was charged twice", questions={"billing": Noul(instructions="Is this about billing?")}
+)
+```
+
+Both endpoints return an `X-Gutcheck-Trace-Id` header, and every decision is logged to SQLite
+(`store.path`) for the feedback and calibration tools coming in M3. Set `api_key` to require
+`Authorization: Bearer <key>` on both.
+
 ## Configuration
 
 Settings come from, highest priority first: command-line flags, `GUTCHECK_*` environment variables,
@@ -70,8 +128,13 @@ example `GUTCHECK_ENGINE__DEVICE=cuda`. See [`gutcheck.example.yaml`](gutcheck.e
 | `port`              | `8080`                      | Bind port                                            |
 | `log_level`         | `info`                      | `critical`, `error`, `warning`, `info` or `debug`    |
 | `engine.device`     | auto                        | Torch device, e.g. `cpu` or `cuda`                   |
-| `engine.models`     | `[english, multilingual]`   | Laya checkpoints to use                              |
+| `engine.models`     | `[english, multilingual]`   | Laya checkpoints loaded at startup (others load on first use) |
 | `engine.max_loaded` | `2`                         | Checkpoints kept in memory at once (2 fits 4 GB VRAM) |
+| `api_key`           | none                        | Require this bearer token on the API                 |
+| `policy.act_at`     | `0.9`                       | Minimum answer probability for `act`                 |
+| `policy.review_at`  | `0.6`                       | Minimum answer probability for `review`              |
+| `store.path`        | `gutcheck.db`               | SQLite decision log (`null` disables it)             |
+| `store.save_state`  | `true`                      | Keep the input text in the log                       |
 
 `gutcheck config` prints the resolved configuration.
 
@@ -82,7 +145,8 @@ ruff check . && ruff format --check .
 pytest
 ```
 
-The tests don't need a GPU or model weights.
+The tests don't need a GPU or model weights. To also run a real Laya checkpoint (downloads
+weights): `RUN_LAYA_E2E=1 pytest tests/e2e`.
 
 ## Roadmap
 

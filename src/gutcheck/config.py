@@ -3,7 +3,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -20,9 +20,34 @@ class EngineSettings(BaseModel):
     model_config = {"extra": "forbid"}
 
     device: str | None = None
+    # checkpoints loaded at startup; others load on first use
     models: list[LayaModel] = ["english", "multilingual"]
     # 2 fits a 4 GB GPU in fp16
     max_loaded: int = Field(2, ge=1, le=3)
+
+
+class Thresholds(BaseModel):
+    """Verdict bands on the probability of the returned answer."""
+
+    model_config = {"extra": "forbid"}
+
+    act_at: float = Field(0.9, ge=0, le=1)
+    review_at: float = Field(0.6, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "Thresholds":
+        if self.review_at > self.act_at:
+            raise ValueError("review_at must not be greater than act_at")
+        return self
+
+
+class StoreSettings(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    # SQLite file for the decision log; null disables logging
+    path: str | None = "gutcheck.db"
+    # store the request state (the input text) alongside each decision
+    save_state: bool = True
 
 
 class Settings(BaseSettings):
@@ -35,7 +60,10 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = Field(8080, ge=1, le=65535)
     log_level: Literal["critical", "error", "warning", "info", "debug"] = "info"
+    api_key: SecretStr | None = None
     engine: EngineSettings = EngineSettings()
+    policy: Thresholds = Thresholds()
+    store: StoreSettings = StoreSettings()
 
     @classmethod
     def settings_customise_sources(

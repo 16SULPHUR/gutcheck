@@ -37,6 +37,30 @@ jobs:
         run: uv pip install -e ".[dev]"
       - run: pytest -q
 
+  e2e:
+    # real Laya weights (English checkpoint), cached between runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          activate-environment: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-laya-${{ hashFiles('pyproject.toml') }}
+          restore-keys: hf-laya-
+      - run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: uv pip install -e ".[dev]"
+      - name: Run e2e tests (fails if they were skipped)
+        shell: bash
+        env:
+          RUN_LAYA_E2E: "1"
+        run: |
+          pytest tests/e2e -rA | tee e2e.txt
+          grep -q "1 passed" e2e.txt && ! grep -q "skipped" e2e.txt
+
   docker:
     runs-on: ubuntu-latest
     steps:
@@ -45,7 +69,8 @@ jobs:
         run: docker build -t gutcheck:ci .
       - name: Smoke test
         run: |
-          docker run -d --name gutcheck -p 8080:8080 gutcheck:ci
+          # skip the model download; the e2e job covers real inference
+          docker run -d --name gutcheck -p 8080:8080 -e "GUTCHECK_ENGINE__MODELS=[]" gutcheck:ci
           for i in $(seq 1 30); do
             if curl -fsS localhost:8080/healthz; then exit 0; fi
             sleep 2

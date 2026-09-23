@@ -10,7 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HF_HOME=/data/hf \
     GUTCHECK_HOST=0.0.0.0 \
-    GUTCHECK_PORT=8080
+    GUTCHECK_PORT=8080 \
+    GUTCHECK_STORE__PATH=/data/gutcheck.db
 
 # torch first, from the variant-specific index, so the default PyPI build is never pulled
 RUN pip install torch --index-url https://download.pytorch.org/whl/${TORCH_VARIANT}
@@ -27,7 +28,8 @@ USER gutcheck
 VOLUME /data
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+# the first start downloads model weights into /data
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
     CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ['GUTCHECK_PORT'] + '/healthz', timeout=4)"
 
 CMD ["gutcheck", "serve"]
