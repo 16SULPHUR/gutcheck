@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gutcheck"
+dynamic = ["version"]
+description = "Open-source decision gateway for AI agents: fast, typed, calibrated answers from Laya"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Ankit", email = "22amtics124@gmail.com" }]
+keywords = ["laya", "llm", "guardrails", "classification", "calibration", "agents"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
+    "pydantic-settings[yaml]>=2.3",
+    "laya>=0.3.10,<0.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx2>=2.13", "ruff>=0.6"]
+
+[project.scripts]
+gutcheck = "gutcheck.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/16SULPHUR/gutcheck"
+Issues = "https://github.com/16SULPHUR/gutcheck/issues"
+
+[tool.hatch.version]
+path = "src/gutcheck/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gutcheck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

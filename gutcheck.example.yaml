@@ -1,0 +1,13 @@
+# Copy to gutcheck.yaml and pass with `gutcheck serve --config gutcheck.yaml`.
+# Environment variables (GUTCHECK_PORT, GUTCHECK_ENGINE__DEVICE, ...) override these values.
+
+host: 127.0.0.1
+port: 8080
+log_level: info
+
+engine:
+  # cpu, cuda, cuda:0 ... leave unset to pick automatically
+  device: cuda
+  # english, multilingual, typed-decisions
+  models: [english, multilingual]
+  max_loaded: 2
