@@ -53,9 +53,13 @@ jobs:
           restore-keys: hf-laya-
       - run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: uv pip install -e ".[dev]"
-      - run: pytest -q tests/e2e
+      - name: Run e2e tests (fails if they were skipped)
+        shell: bash
         env:
           RUN_LAYA_E2E: "1"
+        run: |
+          pytest tests/e2e -rA | tee e2e.txt
+          grep -q "1 passed" e2e.txt && ! grep -q "skipped" e2e.txt
 
   docker:
     runs-on: ubuntu-latest
