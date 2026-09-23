@@ -20,6 +20,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("config", help="print the resolved configuration as JSON")
     show.add_argument("--config", help="path to a YAML config file")
+
+    packs = sub.add_parser("packs", help="list installed question packs")
+    packs.add_argument("--config", help="path to a YAML config file")
+
+    ev = sub.add_parser("eval", help="evaluate question packs against their datasets")
+    ev.add_argument("packs", nargs="*", metavar="PACK", help="pack ids (default: all)")
+    ev.add_argument("--config", help="path to a YAML config file")
+    ev.add_argument(
+        "--calibrate", action="store_true", help="refit temperatures on the calibration split"
+    )
+    ev.add_argument(
+        "--write",
+        action="store_true",
+        help="write eval.json, EVAL.md (and calibration.json) into each pack directory",
+    )
+    ev.add_argument(
+        "--check", action="store_true", help="exit 1 if results fall below the committed baseline"
+    )
+    ev.add_argument("--summary", help="write a Markdown summary of the run to this file")
+    ev.add_argument("--cache-dir", help="where downloaded datasets are kept")
     return parser
 
 
@@ -40,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "config":
         print(settings.model_dump_json(indent=2))
         return 0
+    if args.command == "packs":
+        return _list_packs(settings)
+    if args.command == "eval":
+        return _eval(settings, args)
 
     import uvicorn
 
@@ -49,3 +73,65 @@ def main(argv: list[str] | None = None) -> int:
         create_app(settings), host=settings.host, port=settings.port, log_level=settings.log_level
     )
     return 0
+
+
+def _list_packs(settings: Settings) -> int:
+    from gutcheck.packs import PackError, load_packs
+
+    try:
+        packs = load_packs(settings.packs.dirs)
+    except PackError as e:
+        print(f"gutcheck: {e}", file=sys.stderr)
+        return 2
+    for pack in packs.values():
+        status = "calibrated" if pack.temperatures else "uncalibrated"
+        print(f"{pack.id}@{pack.version} ({status}): {pack.description}")
+        for qid, q in pack.questions.items():
+            print(f"  {pack.id}.{qid} [{q.type}] {q.instructions}")
+    return 0
+
+
+def _eval(settings: Settings, args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from gutcheck import evals
+    from gutcheck.engine import LayaEngine
+    from gutcheck.packs import PackError, load_packs, resolve
+
+    try:
+        installed = load_packs(settings.packs.dirs)
+        selected = [resolve(installed, ref) for ref in args.packs] or list(installed.values())
+    except PackError as e:
+        print(f"gutcheck: {e}", file=sys.stderr)
+        return 2
+    cache_dir = Path(args.cache_dir) if args.cache_dir else evals.DEFAULT_CACHE
+
+    engine = LayaEngine(settings.engine)
+    engine.start()
+    failed = False
+    summary = []
+    try:
+        for pack in selected:
+            # a pack that was never calibrated gets its temperatures fitted on first evaluation
+            calibrate = args.calibrate or not pack.temperatures
+            report = evals.evaluate_pack(
+                engine,
+                pack,
+                settings.policy,
+                calibrate=calibrate,
+                cache_dir=cache_dir,
+                log=lambda m: print(m, file=sys.stderr),
+            )
+            problems = evals.check(report, pack.baseline) if args.check else []
+            failed = failed or bool(problems)
+            for p in problems:
+                print(f"gutcheck: {pack.id}: {p}", file=sys.stderr)
+            if args.write:
+                evals.write_outputs(report, pack, calibrate)
+            print(evals.render_markdown(report, pack))
+            summary.append(evals.render_summary(report, pack, problems, calibrate))
+    finally:
+        engine.close()
+    if args.summary:
+        Path(args.summary).write_text("\n".join(summary))
+    return 1 if failed else 0

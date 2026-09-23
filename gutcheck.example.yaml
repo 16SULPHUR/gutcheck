@@ -21,3 +21,6 @@ policy:
 store:
   path: gutcheck.db   # null disables the decision log
   save_state: true    # keep the input text alongside each decision
+
+packs:
+  dirs: []   # extra directories of question packs; bundled packs are always loaded

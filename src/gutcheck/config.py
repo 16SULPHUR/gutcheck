@@ -50,6 +50,13 @@ class StoreSettings(BaseModel):
     save_state: bool = True
 
 
+class PackSettings(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    # directories of extra packs, on top of the bundled ones
+    dirs: list[str] = []
+
+
 class Settings(BaseSettings):
     """Precedence: explicit overrides > GUTCHECK_* env vars > YAML config file > defaults."""
 
@@ -64,6 +71,7 @@ class Settings(BaseSettings):
     engine: EngineSettings = EngineSettings()
     policy: Thresholds = Thresholds()
     store: StoreSettings = StoreSettings()
+    packs: PackSettings = PackSettings()
 
     @classmethod
     def settings_customise_sources(

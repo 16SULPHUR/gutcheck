@@ -28,7 +28,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx2>=2.13", "ruff>=0.6", "typesafe-sdk>=0.7"]
+eval = ["pyarrow>=14"]
+dev = ["pytest>=8", "httpx2>=2.13", "ruff>=0.6", "typesafe-sdk>=0.7", "pyarrow>=14"]
 
 [project.scripts]
 gutcheck = "gutcheck.cli:main"
