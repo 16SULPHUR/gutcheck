@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff check .
+      - run: uvx ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+      - name: Install CPU torch
+        run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install gutcheck
+        run: uv pip install -e ".[dev]"
+      - run: pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build CPU image
+        run: docker build -t gutcheck:ci .
+      - name: Smoke test
+        run: |
+          docker run -d --name gutcheck -p 8080:8080 gutcheck:ci
+          for i in $(seq 1 30); do
+            if curl -fsS localhost:8080/healthz; then exit 0; fi
+            sleep 2
+          done
+          docker logs gutcheck
+          exit 1
+
+  docker-gpu:
+    # CUDA wheels are several GB, so the GPU image is built on demand and for tags only
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build GPU image
+        run: docker build -t gutcheck:gpu --build-arg TORCH_VARIANT=cu126 .
