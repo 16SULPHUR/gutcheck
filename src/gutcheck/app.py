@@ -93,6 +93,8 @@ class Health(BaseModel):
 class Outcome:
     trace_id: str
     result: dict[str, Any]
+    # question id -> pack checkpoint that answered it, for questions not run on the routed model
+    checkpoints: dict[str, str]
     probabilities: dict[str, float]
     verdicts: dict[str, str] | None
     latency_ms: float
@@ -121,8 +123,12 @@ def _add_packs(
     default: Thresholds,
     questions: dict[str, dict[str, Any]],
     thresholds: dict[str, Thresholds],
+    checkpoints: dict[str, str],
 ) -> dict[str, float]:
-    """Add each pack's questions as "<pack>.<question>"; return their temperatures."""
+    """Add each pack's questions as "<pack>.<question>"; return their temperatures.
+
+    Questions of a pack with its own checkpoint are recorded in `checkpoints`.
+    """
     temperatures = {}
     for ref in refs:
         try:
@@ -136,6 +142,8 @@ def _add_packs(
             questions[full] = q.payload()
             thresholds[full] = policy or q.policy or default
             temperatures[full] = pack.temperatures.get(qid, 1.0)
+            if pack.checkpoint:
+                checkpoints[full] = pack.checkpoint
     return temperatures
 
 
@@ -200,6 +208,11 @@ def create_app(
     settings = settings or load_settings()
     packs = packs if packs is not None else load_packs(settings.packs.dirs)
     engine = engine or LayaEngine(settings.engine)
+    for p in packs.values():
+        if p.model:
+            engine.add_checkpoint(
+                p.checkpoint, p.model_source(), p.model.revision, p.model.subfolder
+            )
     metrics = Metrics()
     pack_questions = {f"{p.id}.{qid}" for p in packs.values() for qid in p.questions}
     # temperatures fitted from feedback, by question fingerprint; they override pack calibration
@@ -246,9 +259,22 @@ def create_app(
         model: str | None,
         thresholds: dict[str, Thresholds] | None,
         temperatures: dict[str, float] | None = None,
+        checkpoints: dict[str, str] | None = None,
     ) -> Outcome:
+        checkpoints = checkpoints or {}
         start = time.perf_counter()
-        result = engine.predict(state, questions, model)
+        routed = {qid: q for qid, q in questions.items() if qid not in checkpoints}
+        result = engine.predict(state, routed, model) if routed or not checkpoints else {}
+        for name in dict.fromkeys(checkpoints.values()):
+            part = {qid: q for qid, q in questions.items() if checkpoints.get(qid) == name}
+            extra = engine.predict(state, part, name)
+            result.setdefault("answers", {}).update(extra.get("answers", {}))
+            result.setdefault("routing", extra.get("routing"))
+            result.setdefault("model", extra.get("model"))
+            if extra.get("usage"):
+                usage = result.setdefault("usage", {"input_tokens": 0, "output_tokens": 0})
+                for k in ("input_tokens", "output_tokens"):
+                    usage[k] = usage.get(k, 0) + extra["usage"].get(k, 0)
         latency_ms = (time.perf_counter() - start) * 1000
 
         temperatures = temperatures or {}
@@ -290,7 +316,7 @@ def create_app(
             except Exception:
                 # a failed log write must not fail the decision
                 log.exception("could not log decision %s", trace_id)
-        return Outcome(trace_id, result, probabilities, verdicts, latency_ms)
+        return Outcome(trace_id, result, checkpoints, probabilities, verdicts, latency_ms)
 
     async def run(*args: Any) -> Outcome:
         try:
@@ -319,6 +345,7 @@ def create_app(
                         qid: {"type": q.type, "instructions": q.instructions}
                         for qid, q in p.questions.items()
                     },
+                    "model": p.model.model_dump() if p.model else None,
                     "calibrated": bool(p.temperatures),
                     "eval": _eval_summary(p),
                 }
@@ -337,14 +364,17 @@ def create_app(
     async def decide(req: DecideRequest, response: Response) -> dict[str, Any]:
         """Answers plus a verdict per question: act, review or escalate."""
         questions, thresholds = _split_policies(req.questions, req.policy or settings.policy)
+        checkpoints: dict[str, str] = {}
         temperatures = _add_packs(
-            packs, req.packs, req.policy, settings.policy, questions, thresholds
+            packs, req.packs, req.policy, settings.policy, questions, thresholds, checkpoints
         )
         for qid, q in questions.items():
             t = learned.get(fingerprint(q))
             if t is not None:
                 temperatures[qid] = t
-        out = await run("decide", req.state, questions, req.model, thresholds, temperatures)
+        out = await run(
+            "decide", req.state, questions, req.model, thresholds, temperatures, checkpoints
+        )
         response.headers[TRACE_HEADER] = out.trace_id
         routing = out.result.get("routing")
         answers = {
@@ -352,6 +382,7 @@ def create_app(
                 **a,
                 "answer_probability": round(out.probabilities[qid], 4),
                 "verdict": out.verdicts[qid],
+                **({"model": out.checkpoints[qid]} if qid in out.checkpoints else {}),
             }
             for qid, a in out.result.get("answers", {}).items()
         }

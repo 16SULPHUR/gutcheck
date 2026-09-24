@@ -41,6 +41,20 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--summary", help="write a Markdown summary of the run to this file")
     ev.add_argument("--cache-dir", help="where downloaded datasets are kept")
 
+    ft = sub.add_parser(
+        "finetune", help="fine-tune a Laya checkpoint on a pack's training data (needs torch)"
+    )
+    ft.add_argument("pack", help="pack id")
+    ft.add_argument("--out", required=True, help="directory for the checkpoint")
+    ft.add_argument("--config", help="path to a YAML config file")
+    ft.add_argument("--base", choices=["english", "multilingual"], default="english")
+    ft.add_argument("--epochs", type=int, default=4)
+    ft.add_argument("--device", help="torch device, e.g. cuda or cpu")
+    ft.add_argument("--max-train", type=int, help="cap training rows per question")
+    ft.add_argument("--max-heldout", type=int, help="cap held-out rows per question")
+    ft.add_argument("--cache-dir", help="where downloaded datasets are kept")
+    ft.add_argument("--push", metavar="REPO", help="upload to this Hugging Face repo ($HF_TOKEN)")
+
     cal = sub.add_parser("calibrate", help="refit temperatures from feedback in the decision log")
     cal.add_argument("--config", help="path to a YAML config file")
     cal.add_argument("--min-samples", type=int, help="labels a question needs before refitting")
@@ -70,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         return _eval(settings, args)
     if args.command == "calibrate":
         return _calibrate(settings, args)
+    if args.command == "finetune":
+        return _finetune(settings, args)
 
     import uvicorn
 
@@ -170,4 +186,38 @@ def _calibrate(settings: Settings, args: argparse.Namespace) -> int:
                 f"ECE {r.ece_before:.3f} -> {r.ece_after:.3f}"
             )
     print("A running server applies new temperatures after a restart or POST /v1/calibrate.")
+    return 0
+
+
+def _finetune(settings: Settings, args: argparse.Namespace) -> int:
+    import os
+    from pathlib import Path
+
+    from gutcheck import evals
+    from gutcheck.finetune import TrainSettings, finetune, push
+    from gutcheck.packs import PackError, load_packs, resolve
+
+    try:
+        pack = resolve(load_packs(settings.packs.dirs), args.pack)
+    except PackError as e:
+        print(f"gutcheck: {e}", file=sys.stderr)
+        return 2
+    ts = TrainSettings(
+        base=args.base, epochs=args.epochs, max_train=args.max_train, max_heldout=args.max_heldout
+    )
+    out = Path(args.out)
+    cache = Path(args.cache_dir) if args.cache_dir else evals.DEFAULT_CACHE
+    report = finetune(pack, out, ts, cache, args.device, log=lambda m: print(m, file=sys.stderr))
+    for qid, q in report["questions"].items():
+        base, tuned = q["heldout_base"], q["heldout_tuned"]
+        print(
+            f"{pack.id}.{qid}: held-out accuracy {base['accuracy']:.3f} -> {tuned['accuracy']:.3f}"
+            f" ({q['heldout_rows']} rows)"
+        )
+    print(
+        f"Checkpoint: {out}. Evaluate it with: gutcheck eval {pack.id} (packs.dirs: [{out}/pack])"
+    )
+    if args.push:
+        commit = push(out, args.push, os.environ.get("HF_TOKEN"))
+        print(f"Pushed to https://huggingface.co/{args.push} at commit {commit}")
     return 0
