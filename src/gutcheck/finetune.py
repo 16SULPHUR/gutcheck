@@ -245,10 +245,10 @@ def finetune(
         "questions": {},
     }
     for qid, question in pack.questions.items():
-        ev = question.eval
-        if ev.calibration is None:
-            raise ValueError(f"{pack.id}.{qid} has no calibration split to train on")
-        rows, commit = load_rows(question, ev.calibration, pack.directory, None, cache_dir)
+        spec = question.eval.train or question.eval.calibration
+        if spec is None:
+            raise ValueError(f"{pack.id}.{qid} has no train or calibration split to train on")
+        rows, commit = load_rows(question, spec, pack.directory, None, cache_dir)
         train, held = split(rows, s.heldout_fraction)
         train, held = train[: s.max_train], held[: s.max_heldout]
         payload = question.payload()
@@ -258,7 +258,7 @@ def finetune(
         heldout[qid] = (payload, held, held_items)
         train_items += items
         report["questions"][qid] = {
-            "data": {**ev.calibration.model_dump(), "commit": commit},
+            "data": {**spec.model_dump(), "commit": commit},
             "train_rows": len(items),
             "heldout_rows": len(held_items),
             "heldout_base": _metrics(base_probs, [it["target"].index(1.0) for it in held_items]),
@@ -302,12 +302,14 @@ def finetune(
 def _write_local_pack(pack: Pack, out: Path) -> None:
     """A copy of the pack at the next version, using this checkpoint and its held-out rows.
 
-    The test split is unchanged; calibration moves to the held-out rows.
+    The test split is unchanged, calibration moves to the held-out rows, and the rows it trained
+    on are kept as the train split.
     """
     data = yaml.safe_load((pack.directory / "pack.yaml").read_text())
     data["version"] = pack.version + 1
     data["model"] = {"repo": "../.."}
     for qid, q in data["questions"].items():
+        q["eval"].setdefault("train", q["eval"]["calibration"])
         q["eval"]["calibration"] = {
             "path": f"../../heldout/{qid}.jsonl",
             "license": pack.questions[qid].eval.calibration.license,

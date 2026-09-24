@@ -167,6 +167,7 @@ def _record(
     probabilities: dict[str, float],
     verdicts: dict[str, str] | None,
     latency_ms: float,
+    checkpoints: dict[str, str],
 ) -> DecisionRecord:
     routing = result.get("routing") or {}
     return DecisionRecord(
@@ -183,7 +184,7 @@ def _record(
                 answer=a,
                 answer_probability=probabilities[qid],
                 verdict=verdicts[qid] if verdicts else None,
-                calibration_key=fingerprint(questions[qid]),
+                calibration_key=fingerprint(questions[qid], checkpoints.get(qid)),
                 options=options(raw_answers[qid]),
                 raw=distribution(raw_answers[qid]),
                 temperature=temperatures.get(qid, 1.0),
@@ -311,6 +312,7 @@ def create_app(
                         probabilities,
                         verdicts,
                         latency_ms,
+                        checkpoints,
                     )
                 )
             except Exception:
@@ -369,7 +371,7 @@ def create_app(
             packs, req.packs, req.policy, settings.policy, questions, thresholds, checkpoints
         )
         for qid, q in questions.items():
-            t = learned.get(fingerprint(q))
+            t = learned.get(fingerprint(q, checkpoints.get(qid)))
             if t is not None:
                 temperatures[qid] = t
         out = await run(

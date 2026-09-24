@@ -28,8 +28,8 @@ def test_extra_dir_pack_with_calibration(tmp_path):
 def test_resolve():
     packs = load_packs()
     assert resolve(packs, "prompt-guard").id == "prompt-guard"
-    assert resolve(packs, "prompt-guard@1").version == 1
-    with pytest.raises(PackError, match="version 1"):
+    assert resolve(packs, "prompt-guard@2").version == 2
+    with pytest.raises(PackError, match="version 2"):
         resolve(packs, "prompt-guard@7")
     with pytest.raises(PackError, match="unknown pack"):
         resolve(packs, "nope")

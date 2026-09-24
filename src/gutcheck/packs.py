@@ -36,6 +36,8 @@ class EvalSpec(BaseModel):
 
     test: DatasetSpec
     calibration: DatasetSpec | None = None
+    # what `gutcheck finetune` trains on; defaults to the calibration split
+    train: DatasetSpec | None = None
     text_field: str
     label_field: str
     # dataset label -> answer: true/false for noul, an option for choice, a level index for score.
