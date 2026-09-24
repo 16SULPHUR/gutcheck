@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gutcheck dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-1: #2a78d6;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+  h1 { font-size: 18px; margin: 0 auto 0 0; }
+  h2 { font-size: 14px; margin: 0 0 12px; }
+  .ranges { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .ranges button {
+    border: 0; background: transparent; color: var(--ink-2); padding: 6px 12px; font: inherit; cursor: pointer;
+  }
+  .ranges button[aria-pressed="true"] { background: var(--surface); color: var(--ink); font-weight: 600; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px; }
+  .tile { margin: 0; }
+  .tile .label { color: var(--ink-2); }
+  .tile .value { font-size: 28px; font-weight: 600; }
+  .tile .sub { color: var(--muted); font-size: 12px; }
+  #loading { transition: opacity .2s; }
+  .stale { opacity: .5; }
+  svg text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .bar:hover, .bar:focus { opacity: .8; outline: none; }
+  #tooltip {
+    position: fixed; pointer-events: none; display: none; background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+  }
+  #tooltip strong { display: block; font-size: 14px; }
+  #tooltip span { color: var(--ink-2); font-size: 12px; }
+  .stack { display: flex; gap: 2px; height: 20px; }
+  .stack div { border-radius: 4px; min-width: 4px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; color: var(--ink-2); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--grid); vertical-align: top; }
+  th { color: var(--ink-2); font-weight: 500; border-top: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td small { display: block; color: var(--muted); }
+  .scroll { overflow-x: auto; }
+  #questions { min-width: 640px; }
+  details { margin-top: 12px; color: var(--ink-2); }
+  .empty { color: var(--muted); }
+  #auth { display: none; gap: 8px; }
+  #auth input { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+  #auth button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+  #error { color: var(--critical); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>gutcheck</h1>
+    <form id="auth">
+      <input id="key" type="password" placeholder="API key" autocomplete="off" aria-label="API key">
+      <button>Connect</button>
+    </form>
+    <div class="ranges" role="group" aria-label="Time range">
+      <button data-hours="24" aria-pressed="true">24 hours</button>
+      <button data-hours="168" aria-pressed="false">7 days</button>
+      <button data-hours="720" aria-pressed="false">30 days</button>
+    </div>
+  </header>
+  <p id="error"></p>
+  <div id="loading">
+    <div class="tiles">
+      <div class="card tile"><div class="label">Decisions</div><div class="value" id="t-decisions">–</div></div>
+      <div class="card tile"><div class="label">Latency p50</div><div class="value" id="t-p50">–</div><div class="sub" id="t-p95"></div></div>
+      <div class="card tile"><div class="label">Accuracy on feedback</div><div class="value" id="t-acc">–</div><div class="sub" id="t-fb"></div></div>
+    </div>
+    <section class="card">
+      <h2 id="chart-title">Decisions per hour</h2>
+      <svg id="chart" width="100%" height="200" role="img" aria-labelledby="chart-title"></svg>
+      <details><summary>Show data</summary><div class="scroll"><table id="chart-table"></table></div></details>
+    </section>
+    <section class="card">
+      <h2>Verdicts</h2>
+      <div class="stack" id="stack"></div>
+      <div class="legend" id="legend"></div>
+    </section>
+    <section class="card">
+      <h2>Questions</h2>
+      <div class="scroll"><table id="questions"></table></div>
+    </section>
+  </div>
+</main>
+<div id="tooltip" role="tooltip"><strong></strong><span></span></div>
+<script>
+const VERDICTS = [
+  { key: "act", label: "✓ act", color: "var(--good)" },
+  { key: "review", label: "! review", color: "var(--warning)" },
+  { key: "escalate", label: "↑ escalate", color: "var(--critical)" },
+];
+const SVG = "http://www.w3.org/2000/svg";
+let hours = 24;
+let last = null;
+
+function storedKey() {
+  try { return localStorage.getItem("gutcheck-key") || ""; } catch { return ""; }
+}
+function saveKey(k) {
+  try { localStorage.setItem("gutcheck-key", k); } catch {}
+}
+const fmt = n => n.toLocaleString();
+const pct = x => (x == null ? "–" : Math.round(x * 100) + "%");
+
+function el(tag, attrs = {}, text) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+const tip = document.getElementById("tooltip");
+function showTip(e, value, label) {
+  tip.firstElementChild.textContent = value;
+  tip.lastElementChild.textContent = label;
+  tip.style.display = "block";
+  const r = e.target.getBoundingClientRect();
+  const x = e.clientX ?? r.left + r.width / 2;
+  const y = e.clientY ?? r.top;
+  tip.style.left = Math.min(x + 12, innerWidth - tip.offsetWidth - 8) + "px";
+  tip.style.top = Math.max(y - tip.offsetHeight - 12, 8) + "px";
+}
+function hideTip() { tip.style.display = "none"; }
+function hoverable(node, value, label) {
+  node.setAttribute("tabindex", "0");
+  node.setAttribute("aria-label", label + ": " + value);
+  node.addEventListener("pointermove", e => showTip(e, value, label));
+  node.addEventListener("focus", e => showTip(e, value, label));
+  node.addEventListener("pointerleave", hideTip);
+  node.addEventListener("blur", hideTip);
+}
+
+// fill empty buckets so gaps read as zero; windows over two days are shown per day
+function buckets(perHour) {
+  const daily = hours > 48;
+  const size = daily ? 864e5 : 36e5;
+  const counts = new Map();
+  for (const { hour, decisions } of perHour) {
+    const t = Math.floor(Date.parse(hour) / size) * size;
+    counts.set(t, (counts.get(t) || 0) + decisions);
+  }
+  const end = Math.floor(Date.now() / size) * size;
+  const n = daily ? Math.ceil(hours / 24) : hours;
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const t = end - i * size;
+    out.push({ t, n: counts.get(t) || 0 });
+  }
+  return { daily, rows: out };
+}
+
+function niceMax(v) {
+  if (v <= 4) return 4;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 2.5, 5, 10].map(m => m * p).find(m => m >= v);
+}
+
+function renderChart(perHour) {
+  const { daily, rows } = buckets(perHour);
+  document.getElementById("chart-title").textContent = daily ? "Decisions per day" : "Decisions per hour";
+  const svg = document.getElementById("chart");
+  svg.replaceChildren();
+  const W = svg.clientWidth || 600, H = 200, L = 40, B = 22, T = 8;
+  const max = niceMax(Math.max(...rows.map(r => r.n)));
+  const y = v => T + (H - T - B) * (1 - v / max);
+  for (let i = 0; i <= 4; i++) {
+    const v = (max / 4) * i;
+    const line = document.createElementNS(SVG, "line");
+    Object.entries({ x1: L, x2: W, y1: y(v), y2: y(v), stroke: i ? "var(--grid)" : "var(--axis)", "stroke-width": 1 })
+      .forEach(([k, val]) => line.setAttribute(k, val));
+    svg.append(line);
+    const label = document.createElementNS(SVG, "text");
+    label.setAttribute("x", L - 6); label.setAttribute("y", y(v) + 4); label.setAttribute("text-anchor", "end");
+    label.textContent = fmt(Math.round(v));
+    svg.append(label);
+  }
+  const band = (W - L) / rows.length;
+  const bw = Math.max(1, Math.min(24, band - 2));
+  const every = Math.ceil(rows.length / Math.max(2, Math.floor((W - L) / 64)));
+  rows.forEach((r, i) => {
+    const x = L + i * band + (band - bw) / 2;
+    const date = new Date(r.t);
+    const when = daily
+      ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric" });
+    if (r.n > 0) {
+      const top = y(r.n), h = y(0) - top, rad = Math.min(4, bw / 2, h);
+      const path = document.createElementNS(SVG, "path");
+      path.setAttribute("d", `M${x},${y(0)}V${top + rad}Q${x},${top} ${x + rad},${top}H${x + bw - rad}Q${x + bw},${top} ${x + bw},${top + rad}V${y(0)}Z`);
+      path.setAttribute("fill", "var(--series-1)");
+      path.setAttribute("class", "bar");
+      hoverable(path, fmt(r.n) + " decisions", when);
+      svg.append(path);
+    }
+    if (i % every === 0) {
+      const label = document.createElementNS(SVG, "text");
+      label.setAttribute("x", x + bw / 2); label.setAttribute("y", H - 6); label.setAttribute("text-anchor", "middle");
+      label.textContent = daily ? when : date.toLocaleTimeString(undefined, { hour: "numeric" });
+      svg.append(label);
+    }
+  });
+  const table = document.getElementById("chart-table");
+  table.replaceChildren(el("tr"));
+  table.firstChild.append(el("th", {}, daily ? "Day" : "Hour"), el("th", { class: "num" }, "Decisions"));
+  for (const r of rows.filter(r => r.n)) {
+    const tr = el("tr");
+    tr.append(el("td", {}, new Date(r.t).toLocaleString()), el("td", { class: "num" }, fmt(r.n)));
+    table.append(tr);
+  }
+}
+
+function renderVerdicts(verdicts) {
+  const total = VERDICTS.reduce((s, v) => s + (verdicts[v.key] || 0), 0);
+  const stack = document.getElementById("stack"), legend = document.getElementById("legend");
+  stack.replaceChildren(); legend.replaceChildren();
+  if (!total) { stack.append(el("span", { class: "empty" }, "No decisions from /v1/decide in this range.")); return; }
+  for (const v of VERDICTS) {
+    const n = verdicts[v.key] || 0;
+    const item = el("span");
+    const key = el("i"); key.style.background = v.color;
+    item.append(key, document.createTextNode(`${v.label} ${fmt(n)} (${pct(n / total)})`));
+    legend.append(item);
+    if (!n) continue;
+    const seg = el("div"); seg.style.flex = String(n); seg.style.background = v.color;
+    hoverable(seg, `${fmt(n)} (${pct(n / total)})`, v.label);
+    stack.append(seg);
+  }
+}
+
+function renderQuestions(questions) {
+  const table = document.getElementById("questions");
+  table.replaceChildren();
+  const head = el("tr");
+  [["Question"], ["Answers", "num"], ["Act / review / escalate", "num"], ["Feedback", "num"], ["Accuracy", "num"], ["Temperature", "num"]]
+    .forEach(([t, c]) => head.append(el("th", c ? { class: c } : {}, t)));
+  table.append(head);
+  if (!questions.length) {
+    const tr = el("tr"); tr.append(el("td", { colspan: 6, class: "empty" }, "No answers logged in this range."));
+    table.append(tr);
+    return;
+  }
+  for (const q of questions) {
+    const tr = el("tr");
+    const name = el("td");
+    name.append(el("strong", {}, q.question_id || q.calibration_key), el("small", {}, `${q.type || ""} · ${q.instructions || ""}`));
+    const split = q.verdicts && Object.keys(q.verdicts).length
+      ? VERDICTS.map(v => fmt(q.verdicts[v.key] || 0)).join(" / ") : "–";
+    tr.append(
+      name,
+      el("td", { class: "num" }, fmt(q.answers)),
+      el("td", { class: "num" }, split),
+      el("td", { class: "num" }, fmt(q.feedback)),
+      el("td", { class: "num" }, pct(q.accuracy)),
+      el("td", { class: "num" }, q.temperature == null ? "–" : q.temperature.toFixed(2)),
+    );
+    table.append(tr);
+  }
+}
+
+async function load() {
+  const box = document.getElementById("loading"), error = document.getElementById("error");
+  box.classList.add("stale");
+  const key = storedKey();
+  const r = await fetch(`/v1/stats?hours=${hours}`, { headers: key ? { Authorization: "Bearer " + key } : {} });
+  box.classList.remove("stale");
+  document.getElementById("auth").style.display = r.status === 401 ? "flex" : "none";
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    error.textContent = r.status === 401 ? "Enter the API key to load stats." : (body.detail || `Request failed (${r.status})`);
+    return;
+  }
+  error.textContent = "";
+  const s = await r.json();
+  last = s;
+  document.getElementById("t-decisions").textContent = fmt(s.decisions);
+  document.getElementById("t-p50").textContent = s.latency_ms.p50 == null ? "–" : s.latency_ms.p50 + " ms";
+  document.getElementById("t-p95").textContent = s.latency_ms.p95 == null ? "" : `p95 ${s.latency_ms.p95} ms`;
+  const fb = s.questions.reduce((n, q) => n + q.feedback, 0);
+  const right = s.questions.reduce((n, q) => n + (q.accuracy || 0) * q.feedback, 0);
+  document.getElementById("t-acc").textContent = fb ? pct(right / fb) : "–";
+  document.getElementById("t-fb").textContent = `${fmt(fb)} labelled answers`;
+  renderChart(s.per_hour);
+  renderVerdicts(s.verdicts);
+  renderQuestions(s.questions);
+}
+
+document.querySelectorAll(".ranges button").forEach(b => b.addEventListener("click", () => {
+  hours = Number(b.dataset.hours);
+  document.querySelectorAll(".ranges button").forEach(o => o.setAttribute("aria-pressed", String(o === b)));
+  load();
+}));
+document.getElementById("auth").addEventListener("submit", e => {
+  e.preventDefault();
+  saveKey(document.getElementById("key").value);
+  load();
+});
+addEventListener("resize", () => last && renderChart(last.per_hour));
+load();
+</script>
+</body>
+</html>

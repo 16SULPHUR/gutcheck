@@ -40,6 +40,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ev.add_argument("--summary", help="write a Markdown summary of the run to this file")
     ev.add_argument("--cache-dir", help="where downloaded datasets are kept")
+
+    cal = sub.add_parser("calibrate", help="refit temperatures from feedback in the decision log")
+    cal.add_argument("--config", help="path to a YAML config file")
+    cal.add_argument("--min-samples", type=int, help="labels a question needs before refitting")
     return parser
 
 
@@ -64,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
         return _list_packs(settings)
     if args.command == "eval":
         return _eval(settings, args)
+    if args.command == "calibrate":
+        return _calibrate(settings, args)
 
     import uvicorn
 
@@ -135,3 +141,33 @@ def _eval(settings: Settings, args: argparse.Namespace) -> int:
     if args.summary:
         Path(args.summary).write_text("\n".join(summary))
     return 1 if failed else 0
+
+
+def _calibrate(settings: Settings, args: argparse.Namespace) -> int:
+    from gutcheck.feedback import recalibrate
+    from gutcheck.store import DecisionStore
+
+    if not settings.store.path:
+        print("gutcheck: the decision log is disabled (store.path is null)", file=sys.stderr)
+        return 2
+    min_samples = args.min_samples or settings.calibration.min_samples
+    store = DecisionStore(settings.store.path, settings.store.save_state)
+    try:
+        refits = recalibrate(store, min_samples)
+        described = store.questions()
+    finally:
+        store.close()
+    if not refits:
+        print("No labelled answers yet. Send some with POST /v1/feedback.")
+        return 0
+    for key, r in refits.items():
+        name = described.get(key, {}).get("question_id") or key
+        if r.temperature is None:
+            print(f"{name}: {r.n} labels, needs {min_samples}; unchanged")
+        else:
+            print(
+                f"{name}: {r.n} labels, accuracy {r.accuracy:.3f}, temperature {r.temperature}, "
+                f"ECE {r.ece_before:.3f} -> {r.ece_after:.3f}"
+            )
+    print("A running server applies new temperatures after a restart or POST /v1/calibrate.")
+    return 0

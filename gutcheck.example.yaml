@@ -24,3 +24,6 @@ store:
 
 packs:
   dirs: []   # extra directories of question packs; bundled packs are always loaded
+
+calibration:
+  min_samples: 30   # labels a question needs before POST /v1/calibrate refits it
