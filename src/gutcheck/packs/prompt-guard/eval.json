@@ -1,0 +1,109 @@
+{
+  "pack": "prompt-guard",
+  "version": 2,
+  "gutcheck": "0.0.1",
+  "laya": "0.3.20",
+  "generated_at": "2026-09-24",
+  "questions": {
+    "injection": {
+      "dataset": {
+        "repo": "deepset/prompt-injections",
+        "repo_type": "dataset",
+        "revision": "4f61ecb038e9c3fb77e21034b22511b523772cdd",
+        "path": "data/test-00000-of-00001-701d16158af87368.parquet",
+        "license": "Apache-2.0",
+        "commit": "4f61ecb038e9c3fb77e21034b22511b523772cdd"
+      },
+      "temperature": 1.6892,
+      "thresholds": {
+        "act_at": 0.9,
+        "review_at": 0.6
+      },
+      "raw": {
+        "n": 116,
+        "accuracy": 0.9483,
+        "brier": 0.0463,
+        "ece": 0.0431,
+        "act_rate": 0.9741,
+        "act_accuracy": 0.9646,
+        "review_rate": 0.0259,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.9,
+        "f1": 0.9474
+      },
+      "calibrated": {
+        "n": 116,
+        "accuracy": 0.9483,
+        "brier": 0.0434,
+        "ece": 0.011,
+        "act_rate": 0.9741,
+        "act_accuracy": 0.9646,
+        "review_rate": 0.0259,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.9,
+        "f1": 0.9474
+      },
+      "latency_ms": {
+        "p50": 397.1,
+        "p95": 742.8
+      },
+      "models": {
+        "prompt-guard@2": 116
+      }
+    },
+    "jailbreak": {
+      "dataset": {
+        "repo": "jackhhao/jailbreak-classification",
+        "repo_type": "dataset",
+        "revision": "2f2ceeb39658696fd3f462403562b6eea5306287",
+        "path": "default/jailbreak_dataset_test.csv",
+        "license": "Apache-2.0",
+        "commit": "2f2ceeb39658696fd3f462403562b6eea5306287"
+      },
+      "temperature": 1.0778,
+      "thresholds": {
+        "act_at": 0.9,
+        "review_at": 0.6
+      },
+      "raw": {
+        "n": 400,
+        "accuracy": 1.0,
+        "brier": 0.0004,
+        "ece": 0.0041,
+        "act_rate": 0.995,
+        "act_accuracy": 1.0,
+        "review_rate": 0.005,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "calibrated": {
+        "n": 400,
+        "accuracy": 1.0,
+        "brier": 0.0004,
+        "ece": 0.0056,
+        "act_rate": 0.995,
+        "act_accuracy": 1.0,
+        "review_rate": 0.005,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "latency_ms": {
+        "p50": 802.4,
+        "p95": 2135.0
+      },
+      "models": {
+        "prompt-guard@2": 400
+      }
+    }
+  },
+  "temperatures": {
+    "injection": 1.6892,
+    "jailbreak": 1.0778
+  }
+}
