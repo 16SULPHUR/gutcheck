@@ -47,7 +47,8 @@ def fetch(
     target = cache_dir / spec.repo / spec.revision / spec.path
     commit_file = target.parent / (target.name + ".commit")
     if not target.exists():
-        url = f"https://huggingface.co/datasets/{spec.repo}/resolve/{spec.revision}/{spec.path}"
+        kind = "datasets/" if spec.repo_type == "dataset" else ""
+        url = f"https://huggingface.co/{kind}{spec.repo}/resolve/{spec.revision}/{spec.path}"
         with urllib.request.urlopen(url, timeout=120) as resp:
             data = resp.read()
             commit = resp.headers.get("X-Repo-Commit") or ""
@@ -97,12 +98,14 @@ def load_rows(
     return rows, commit
 
 
-def predict(engine: Engine, question: PackQuestion, rows: list[Row]) -> list[Prediction]:
+def predict(
+    engine: Engine, question: PackQuestion, rows: list[Row], model: str | None = None
+) -> list[Prediction]:
     payload = {"q": question.payload()}
     preds = []
     for row in rows:
         start = time.perf_counter()
-        result = engine.predict(row.state, payload)
+        result = engine.predict(row.state, payload, model)
         latency_ms = (time.perf_counter() - start) * 1000
         model = (result.get("routing") or {}).get("model")
         preds.append(Prediction(distribution(result["answers"]["q"]), row.label, latency_ms, model))
@@ -172,6 +175,9 @@ def evaluate_pack(
         "questions": {},
     }
     temperatures = dict(pack.temperatures)
+    model = pack.checkpoint
+    if model:
+        engine.add_checkpoint(model, pack.model_source(), pack.model.revision, pack.model.subfolder)
     for qid, question in pack.questions.items():
         ev = question.eval
         thresholds = question.policy or default_policy
@@ -180,11 +186,11 @@ def evaluate_pack(
                 question, ev.calibration, pack.directory, ev.calibration_max_rows, cache_dir
             )
             log(f"{pack.id}.{qid}: fitting temperature on {len(rows)} rows")
-            cal = predict(engine, question, rows)
+            cal = predict(engine, question, rows, model)
             temperatures[qid] = fit_temperature([(p.probs, p.label) for p in cal])
         rows, commit = load_rows(question, ev.test, pack.directory, ev.max_rows, cache_dir)
         log(f"{pack.id}.{qid}: evaluating {len(rows)} rows")
-        preds = predict(engine, question, rows)
+        preds = predict(engine, question, rows, model)
         temperature = temperatures.get(qid, 1.0)
         latencies = [p.latency_ms for p in preds]
         report["questions"][qid] = {

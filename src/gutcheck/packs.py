@@ -22,8 +22,10 @@ def label_key(value: Any) -> str:
 class DatasetSpec(BaseModel):
     model_config = {"extra": "forbid"}
 
-    # Hugging Face dataset repo; without one, `path` is relative to the pack directory
+    # Hugging Face repo; without one, `path` is relative to the pack directory
     repo: str | None = None
+    # held-out splits can ship inside a model repo next to the checkpoint they calibrate
+    repo_type: Literal["dataset", "model"] = "dataset"
     revision: str = "main"
     path: str
     license: str
@@ -84,12 +86,25 @@ class PackQuestion(BaseModel):
         return options.index(value)
 
 
+class ModelSpec(BaseModel):
+    """A Laya checkpoint fine-tuned for this pack's questions."""
+
+    model_config = {"extra": "forbid"}
+
+    # Hugging Face model repo, or a directory relative to the pack
+    repo: str
+    revision: str = "main"
+    subfolder: str | None = None
+
+
 class Pack(BaseModel):
     model_config = {"extra": "forbid"}
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     version: int = Field(ge=1)
     description: str
+    # questions run on this checkpoint instead of the routed base models
+    model: ModelSpec | None = None
     questions: dict[str, PackQuestion] = Field(min_length=1)
 
     _directory: Path = PrivateAttr(default=Path("."))
@@ -99,6 +114,17 @@ class Pack(BaseModel):
     @property
     def directory(self) -> Path:
         return self._directory
+
+    @property
+    def checkpoint(self) -> str | None:
+        """Engine name of the pack's own checkpoint, if it has one."""
+        return f"{self.id}@{self.version}" if self.model else None
+
+    def model_source(self) -> str:
+        """Local directory or Hugging Face repo id of the pack's checkpoint."""
+        assert self.model is not None
+        local = self._directory / self.model.repo
+        return str(local) if local.is_dir() else self.model.repo
 
     @property
     def temperatures(self) -> dict[str, float]:

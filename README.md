@@ -212,6 +212,27 @@ Temperatures are fitted on the calibration split and the report is computed on t
 `--check` fails when calibrated accuracy drops more than 0.02 or ECE rises more than 0.03 against
 the committed `eval.json`. CI runs it for the bundled packs on every pull request.
 
+### Fine-tuning a pack's model
+
+A pack can run on its own fine-tuned Laya checkpoint instead of the shared ones. Its questions are
+then answered by that checkpoint, and `/v1/decide` reports it as the answer's `model`:
+
+```yaml
+model: {repo: you/laya-prompt-guard, revision: <commit>}   # or a local directory
+```
+
+`gutcheck finetune` trains one on the pack's calibration split (needs a GPU for real runs):
+
+```bash
+gutcheck finetune prompt-guard --out ./laya-prompt-guard --push you/laya-prompt-guard  # $HF_TOKEN
+```
+
+It holds back 20% of the rows to measure the result and fit temperatures, and writes the
+checkpoint, a model card, the held-out rows and a ready-to-use `pack/` (version + 1) that points
+at them. Add that directory to `packs.dirs` to serve or `gutcheck eval` it. Datasets inside a model
+repo use `repo_type: model`. No GPU? [`training/prompt_guard_kaggle.ipynb`](training/prompt_guard_kaggle.ipynb)
+runs it on Kaggle's free T4s.
+
 ## Configuration
 
 Settings come from, highest priority first: command-line flags, `GUTCHECK_*` environment variables,
