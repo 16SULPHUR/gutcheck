@@ -1,109 +1,109 @@
 {
   "pack": "prompt-guard",
-  "version": 1,
+  "version": 2,
   "gutcheck": "0.0.1",
-  "laya": "0.3.11",
-  "generated_at": "2026-09-23",
+  "laya": "0.3.20",
+  "generated_at": "2026-09-24",
   "questions": {
     "injection": {
       "dataset": {
         "repo": "deepset/prompt-injections",
+        "repo_type": "dataset",
         "revision": "4f61ecb038e9c3fb77e21034b22511b523772cdd",
         "path": "data/test-00000-of-00001-701d16158af87368.parquet",
         "license": "Apache-2.0",
         "commit": "4f61ecb038e9c3fb77e21034b22511b523772cdd"
       },
-      "temperature": 5.5988,
+      "temperature": 1.6892,
       "thresholds": {
         "act_at": 0.9,
         "review_at": 0.6
       },
       "raw": {
         "n": 116,
-        "accuracy": 0.6379,
-        "brier": 0.2604,
-        "ece": 0.2311,
-        "act_rate": 0.5776,
-        "act_accuracy": 0.7463,
-        "review_rate": 0.3793,
-        "escalate_rate": 0.0431,
-        "precision": 0.6071,
-        "recall": 0.85,
-        "f1": 0.7083
+        "accuracy": 0.9483,
+        "brier": 0.0463,
+        "ece": 0.0431,
+        "act_rate": 0.9741,
+        "act_accuracy": 0.9646,
+        "review_rate": 0.0259,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.9,
+        "f1": 0.9474
       },
       "calibrated": {
         "n": 116,
-        "accuracy": 0.6379,
-        "brier": 0.2172,
-        "ece": 0.1132,
-        "act_rate": 0.0345,
-        "act_accuracy": 1.0,
-        "review_rate": 0.5259,
-        "escalate_rate": 0.4397,
-        "precision": 0.6071,
-        "recall": 0.85,
-        "f1": 0.7083
+        "accuracy": 0.9483,
+        "brier": 0.0434,
+        "ece": 0.011,
+        "act_rate": 0.9741,
+        "act_accuracy": 0.9646,
+        "review_rate": 0.0259,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.9,
+        "f1": 0.9474
       },
       "latency_ms": {
-        "p50": 527.3,
-        "p95": 831.0
+        "p50": 397.1,
+        "p95": 742.8
       },
       "models": {
-        "english": 77,
-        "multilingual": 39
+        "prompt-guard@2": 116
       }
     },
     "jailbreak": {
       "dataset": {
         "repo": "jackhhao/jailbreak-classification",
+        "repo_type": "dataset",
         "revision": "2f2ceeb39658696fd3f462403562b6eea5306287",
         "path": "default/jailbreak_dataset_test.csv",
         "license": "Apache-2.0",
         "commit": "2f2ceeb39658696fd3f462403562b6eea5306287"
       },
-      "temperature": 2.1147,
+      "temperature": 1.0778,
       "thresholds": {
         "act_at": 0.9,
         "review_at": 0.6
       },
       "raw": {
         "n": 400,
-        "accuracy": 0.8225,
-        "brier": 0.124,
-        "ece": 0.0891,
-        "act_rate": 0.7,
-        "act_accuracy": 0.9393,
-        "review_rate": 0.255,
-        "escalate_rate": 0.045,
-        "precision": 0.6651,
+        "accuracy": 1.0,
+        "brier": 0.0004,
+        "ece": 0.0041,
+        "act_rate": 0.995,
+        "act_accuracy": 1.0,
+        "review_rate": 0.005,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
         "recall": 1.0,
-        "f1": 0.7989
+        "f1": 1.0
       },
       "calibrated": {
         "n": 400,
-        "accuracy": 0.8225,
-        "brier": 0.111,
-        "ece": 0.0492,
-        "act_rate": 0.3825,
+        "accuracy": 1.0,
+        "brier": 0.0004,
+        "ece": 0.0056,
+        "act_rate": 0.995,
         "act_accuracy": 1.0,
-        "review_rate": 0.515,
-        "escalate_rate": 0.1025,
-        "precision": 0.6651,
+        "review_rate": 0.005,
+        "escalate_rate": 0.0,
+        "precision": 1.0,
         "recall": 1.0,
-        "f1": 0.7989
+        "f1": 1.0
       },
       "latency_ms": {
-        "p50": 1136.7,
-        "p95": 3030.6
+        "p50": 802.4,
+        "p95": 2135.0
       },
       "models": {
-        "english": 392,
-        "multilingual": 8
+        "prompt-guard@2": 400
       }
     }
   },
   "temperatures": {
-    "injection": 5.5988,
-    "jailbreak": 2.1147
+    "injection": 1.6892,
+    "jailbreak": 1.0778
   }
 }
