@@ -50,6 +50,13 @@ class StoreSettings(BaseModel):
     save_state: bool = True
 
 
+class CalibrationSettings(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    # labelled answers a question needs before feedback replaces its temperature
+    min_samples: int = Field(30, ge=2)
+
+
 class PackSettings(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -72,6 +79,7 @@ class Settings(BaseSettings):
     policy: Thresholds = Thresholds()
     store: StoreSettings = StoreSettings()
     packs: PackSettings = PackSettings()
+    calibration: CalibrationSettings = CalibrationSettings()
 
     @classmethod
     def settings_customise_sources(

@@ -11,8 +11,9 @@ each with a verdict on whether it is safe to act on.
    └─ needs_tool               none  0.41   → review
 ```
 
-> **Status: early development (M2).** The gateway serves Laya decisions with verdicts, logs them,
-> and ships the first question pack with a published eval. See the [roadmap](#roadmap).
+> **Status: early development (M3).** The gateway serves Laya decisions with verdicts, ships the
+> first question pack with a published eval, and recalibrates from your feedback. See the
+> [roadmap](#roadmap).
 
 ## Why
 
@@ -114,8 +115,45 @@ client.system_one(
 ```
 
 Both endpoints return an `X-Gutcheck-Trace-Id` header, and every decision is logged to SQLite
-(`store.path`) for the feedback and calibration tools coming in M3. Set `api_key` to require
-`Authorization: Bearer <key>` on both.
+(`store.path`). Set `api_key` to require `Authorization: Bearer <key>` on every endpoint except
+`/healthz` and the dashboard page.
+
+### `POST /v1/feedback`
+
+Tell gutcheck what the right answer was. Give the true answer, or just whether the returned one
+was right:
+
+```bash
+curl -s localhost:8080/v1/feedback -H 'Content-Type: application/json' -d '{
+  "trace_id": "gc_4f9c...",
+  "answers": {"refund": {"answer": false}, "department": {"correct": true}},
+  "source": "support-agent"
+}'
+```
+
+`answer` is `true`/`false` for `noul`, an option for `choice`, and a level for `score`. A
+`correct: false` on a yes/no question implies the other answer; on questions with more options it
+counts toward accuracy but not calibration. A later label for the same answer replaces an earlier
+one.
+
+### `POST /v1/calibrate`
+
+Refits a temperature for every question with at least `calibration.min_samples` labels (override
+with `{"min_samples": 50}`) and applies it to new decisions straight away. Learned temperatures are
+saved in the decision log, survive restarts, and override a pack's shipped calibration. Questions
+are matched by their wording and options, so editing a question starts it fresh. The response
+reports accuracy and ECE before and after for each question. `gutcheck calibrate` does the same
+offline; a running server picks its results up on restart.
+
+### Metrics and dashboard
+
+`GET /metrics` serves Prometheus metrics: `gutcheck_decisions_total`,
+`gutcheck_inference_seconds`, `gutcheck_verdicts_total` and `gutcheck_feedback_total`. Pack
+questions are labelled by name; inline questions share the label `inline`.
+
+`GET /dashboard` is a built-in page showing traffic, latency, the verdict mix, and per-question
+accuracy from feedback over the last day, week or month. It reads `GET /v1/stats`, which you can
+also query directly.
 
 ## Question packs
 
@@ -167,6 +205,7 @@ Face Hub pinned to a revision. Then:
 gutcheck packs                          # list installed packs
 gutcheck eval support-triage --write    # fit temperatures, write eval.json, EVAL.md, calibration.json
 gutcheck eval --check                   # re-run every pack; exit 1 if accuracy or ECE regressed
+gutcheck calibrate                      # refit temperatures from feedback in the decision log
 ```
 
 Temperatures are fitted on the calibration split and the report is computed on the test split.
@@ -193,6 +232,7 @@ example `GUTCHECK_ENGINE__DEVICE=cuda`. See [`gutcheck.example.yaml`](gutcheck.e
 | `store.path`        | `gutcheck.db`               | SQLite decision log (`null` disables it)             |
 | `store.save_state`  | `true`                      | Keep the input text in the log                       |
 | `packs.dirs`        | `[]`                        | Extra directories to load question packs from        |
+| `calibration.min_samples` | `30`                  | Labels a question needs before feedback recalibrates it |
 
 `gutcheck config` prints the resolved configuration.
 

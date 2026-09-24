@@ -6,18 +6,25 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from importlib import resources
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
-from pydantic import BaseModel, ValidationError
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
+from fastapi.responses import HTMLResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from gutcheck import __version__
-from gutcheck.calibration import apply_temperature
+from gutcheck.calibration import apply_temperature, distribution
 from gutcheck.config import Settings, Thresholds, load_settings
 from gutcheck.engine import Engine, LayaEngine
-from gutcheck.packs import Pack, PackError, load_packs, resolve
+from gutcheck.feedback import fingerprint, options, recalibrate, resolve
+from gutcheck.metrics import Metrics
+from gutcheck.packs import Pack, PackError, load_packs
+from gutcheck.packs import resolve as resolve_pack
 from gutcheck.policy import answer_probability, verdict
-from gutcheck.store import AnswerRecord, DecisionRecord, DecisionStore
+from gutcheck.store import AnswerRecord, DecisionRecord, DecisionStore, FeedbackRecord
 
 TRACE_HEADER = "X-Gutcheck-Trace-Id"
 
@@ -40,6 +47,35 @@ class DecideRequest(BaseModel):
     model: str | None = None
     policy: Thresholds | None = None
     packs: list[str] = []
+
+
+class FeedbackItem(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    # the true answer (true/false, an option, or a score level), or just whether it was right
+    answer: bool | int | str | None = None
+    correct: bool | None = None
+
+    @model_validator(mode="after")
+    def _one(self) -> "FeedbackItem":
+        if (self.answer is None) == (self.correct is None):
+            raise ValueError("give exactly one of `answer` or `correct`")
+        return self
+
+
+class FeedbackRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    trace_id: str
+    answers: dict[str, FeedbackItem] = Field(min_length=1)
+    source: str | None = None
+    note: str | None = None
+
+
+class CalibrateRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    min_samples: int | None = Field(None, ge=2)
 
 
 class EngineStatus(BaseModel):
@@ -90,7 +126,7 @@ def _add_packs(
     temperatures = {}
     for ref in refs:
         try:
-            pack = resolve(packs, ref)
+            pack = resolve_pack(packs, ref)
         except PackError as e:
             raise HTTPException(422, str(e)) from e
         for qid, q in pack.questions.items():
@@ -118,6 +154,8 @@ def _record(
     state: State,
     questions: dict[str, dict[str, Any]],
     result: dict[str, Any],
+    raw_answers: dict[str, dict[str, Any]],
+    temperatures: dict[str, float],
     probabilities: dict[str, float],
     verdicts: dict[str, str] | None,
     latency_ms: float,
@@ -137,10 +175,20 @@ def _record(
                 answer=a,
                 answer_probability=probabilities[qid],
                 verdict=verdicts[qid] if verdicts else None,
+                calibration_key=fingerprint(questions[qid]),
+                options=options(raw_answers[qid]),
+                raw=distribution(raw_answers[qid]),
+                temperature=temperatures.get(qid, 1.0),
             )
             for qid, a in result.get("answers", {}).items()
         ],
     )
+
+
+def _percentile(ordered: list[float], q: float) -> float | None:
+    if not ordered:
+        return None
+    return round(ordered[min(len(ordered) - 1, int(q * len(ordered)))], 1)
 
 
 def create_app(
@@ -152,20 +200,29 @@ def create_app(
     settings = settings or load_settings()
     packs = packs if packs is not None else load_packs(settings.packs.dirs)
     engine = engine or LayaEngine(settings.engine)
+    metrics = Metrics()
+    pack_questions = {f"{p.id}.{qid}" for p in packs.values() for qid in p.questions}
+    # temperatures fitted from feedback, by question fingerprint; they override pack calibration
+    learned: dict[str, float] = {}
     # one forward pass at a time; inference is blocking torch and must stay off the event loop
-    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gutcheck-infer")
+    pool: ThreadPoolExecutor | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal store
-        if store is None and settings.store.path:
+        nonlocal store, pool
+        owns_store = store is None and bool(settings.store.path)
+        if owns_store:
             store = DecisionStore(settings.store.path, settings.store.save_state)
+        if store is not None:
+            learned.update(store.temperatures())
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gutcheck-infer")
         engine.start()
         yield
         pool.shutdown(wait=True)
         engine.close()
-        if store is not None:
+        if owns_store:
             store.close()
+            store = None
 
     app = FastAPI(title="gutcheck", version=__version__, lifespan=lifespan)
     app.state.settings = settings
@@ -179,6 +236,9 @@ def create_app(
         ):
             raise HTTPException(401, "invalid or missing bearer token")
 
+    def metric_label(qid: str) -> str:
+        return qid if qid in pack_questions else "inline"
+
     def infer(
         endpoint: str,
         state: State,
@@ -191,10 +251,12 @@ def create_app(
         result = engine.predict(state, questions, model)
         latency_ms = (time.perf_counter() - start) * 1000
 
+        temperatures = temperatures or {}
+        raw_answers = result.get("answers", {})
         if temperatures:
             result["answers"] = {
                 qid: apply_temperature(a, temperatures.get(qid, 1.0))
-                for qid, a in result.get("answers", {}).items()
+                for qid, a in raw_answers.items()
             }
         answers = result.get("answers", {})
         probabilities = {qid: answer_probability(a) for qid, a in answers.items()}
@@ -203,6 +265,11 @@ def create_app(
             if thresholds is not None
             else None
         )
+        model_name = (result.get("routing") or {}).get("model") or "unknown"
+        metrics.decisions.labels(endpoint, model_name).inc()
+        metrics.inference.labels(endpoint).observe(latency_ms / 1000)
+        for qid, v in (verdicts or {}).items():
+            metrics.verdicts.labels(metric_label(qid), v).inc()
         trace_id = "gc_" + uuid.uuid4().hex
         if store is not None:
             try:
@@ -213,6 +280,8 @@ def create_app(
                         state,
                         questions,
                         result,
+                        raw_answers,
+                        temperatures,
                         probabilities,
                         verdicts,
                         latency_ms,
@@ -271,6 +340,10 @@ def create_app(
         temperatures = _add_packs(
             packs, req.packs, req.policy, settings.policy, questions, thresholds
         )
+        for qid, q in questions.items():
+            t = learned.get(fingerprint(q))
+            if t is not None:
+                temperatures[qid] = t
         out = await run("decide", req.state, questions, req.model, thresholds, temperatures)
         response.headers[TRACE_HEADER] = out.trace_id
         routing = out.result.get("routing")
@@ -290,5 +363,120 @@ def create_app(
             "usage": out.result.get("usage"),
             "latency_ms": round(out.latency_ms, 1),
         }
+
+    def require_store() -> DecisionStore:
+        if store is None:
+            raise HTTPException(409, "the decision log is disabled (store.path is null)")
+        return store
+
+    @app.post("/v1/feedback", dependencies=[Depends(require_key)])
+    def feedback(req: FeedbackRequest) -> dict[str, Any]:
+        """Record the true answers for a logged decision."""
+        db = require_store()
+        if not db.has_decision(req.trace_id):
+            raise HTTPException(404, f"no decision with trace id {req.trace_id!r}")
+        records, recorded = [], []
+        for qid, item in req.answers.items():
+            logged = db.answer(req.trace_id, qid)
+            if logged is None:
+                raise HTTPException(404, f"decision {req.trace_id!r} has no question {qid!r}")
+            if logged["raw"] is None:
+                raise HTTPException(422, f"question {qid!r} was logged before feedback existed")
+            try:
+                label, correct = resolve(
+                    logged["options"], logged["raw"], item.answer, item.correct
+                )
+            except ValueError as e:
+                raise HTTPException(422, f"question {qid!r}: {e}") from e
+            records.append(FeedbackRecord(req.trace_id, qid, label, correct, req.source, req.note))
+            recorded.append(
+                {
+                    "question_id": qid,
+                    "answer": logged["options"][label] if label is not None else None,
+                    "correct": correct,
+                }
+            )
+        db.add_feedback(records)
+        for r in records:
+            metrics.feedback.labels(metric_label(r.question_id), str(r.correct).lower()).inc()
+        return {"trace_id": req.trace_id, "recorded": recorded}
+
+    @app.post("/v1/calibrate", dependencies=[Depends(require_key)])
+    def calibrate(req: CalibrateRequest | None = None) -> dict[str, Any]:
+        """Refit temperatures from feedback and apply them to new decisions."""
+        db = require_store()
+        min_samples = (req and req.min_samples) or settings.calibration.min_samples
+        refits = recalibrate(db, min_samples)
+        learned.update({k: r.temperature for k, r in refits.items() if r.temperature})
+        described = db.questions()
+        return {
+            "min_samples": min_samples,
+            "questions": [
+                {
+                    "calibration_key": key,
+                    "question_id": described.get(key, {}).get("question_id"),
+                    **vars(r),
+                }
+                for key, r in refits.items()
+            ],
+        }
+
+    @app.get("/v1/stats", dependencies=[Depends(require_key)])
+    def stats(hours: int = Query(24, ge=1, le=24 * 90)) -> dict[str, Any]:
+        """Traffic, verdicts and feedback accuracy for the dashboard."""
+        db = require_store()
+        since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        raw = db.stats(since)
+        described = db.questions()
+        per_q: dict[str, dict[str, Any]] = {}
+        for key, v, count in raw["per_question"]:
+            q = per_q.setdefault(key, {"answers": 0, "verdicts": {}})
+            q["answers"] += count
+            if v is not None:
+                q["verdicts"][v] = count
+        for key, n, n_correct in raw["labelled"]:
+            q = per_q.setdefault(key, {"answers": 0, "verdicts": {}})
+            q["feedback"] = n
+            q["accuracy"] = round(n_correct / n, 4)
+        questions = []
+        for key, q in per_q.items():
+            d = described.get(key, {})
+            questions.append(
+                {
+                    "calibration_key": key,
+                    "question_id": d.get("question_id"),
+                    "type": d.get("type"),
+                    "instructions": d.get("instructions"),
+                    "answers": q["answers"],
+                    "verdicts": q["verdicts"],
+                    "feedback": q.get("feedback", 0),
+                    "accuracy": q.get("accuracy"),
+                    "temperature": learned.get(key),
+                }
+            )
+        questions.sort(key=lambda q: -q["answers"])
+        verdicts: dict[str, int] = {}
+        for q in questions:
+            for v, n in q["verdicts"].items():
+                verdicts[v] = verdicts.get(v, 0) + n
+        return {
+            "hours": hours,
+            "decisions": len(raw["latencies"]),
+            "per_hour": [{"hour": h + ":00Z", "decisions": n} for h, n in raw["per_hour"]],
+            "latency_ms": {
+                "p50": _percentile(raw["latencies"], 0.5),
+                "p95": _percentile(raw["latencies"], 0.95),
+            },
+            "verdicts": verdicts,
+            "questions": questions,
+        }
+
+    @app.get("/metrics", dependencies=[Depends(require_key)])
+    def prometheus() -> Response:
+        return Response(generate_latest(metrics.registry), media_type=CONTENT_TYPE_LATEST)
+
+    @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+    def dashboard() -> str:
+        return resources.files("gutcheck").joinpath("static/dashboard.html").read_text()
 
     return app

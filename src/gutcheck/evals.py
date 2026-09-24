@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from gutcheck import __version__
-from gutcheck.calibration import distribution, fit_temperature, scale
+from gutcheck.calibration import distribution, ece, fit_temperature, scale
 from gutcheck.config import Thresholds
 from gutcheck.engine import Engine
 from gutcheck.packs import DatasetSpec, Pack, PackQuestion, label_key
@@ -109,17 +109,6 @@ def predict(engine: Engine, question: PackQuestion, rows: list[Row]) -> list[Pre
     return preds
 
 
-def _ece(conf: list[float], correct: list[bool], bins: int = 10) -> float:
-    total, err = len(conf), 0.0
-    for b in range(bins):
-        lo, hi = b / bins, (b + 1) / bins
-        idx = [i for i, c in enumerate(conf) if (lo <= c <= hi if b == 0 else lo < c <= hi)]
-        if idx:
-            gap = statistics.fmean(conf[i] for i in idx) - statistics.fmean(correct[i] for i in idx)
-            err += len(idx) / total * abs(gap)
-    return err
-
-
 def _pct(values: list[float], q: float) -> float:
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, int(q * len(ordered)))]
@@ -148,7 +137,7 @@ def metrics(
         "accuracy": statistics.fmean(correct),
         # binary questions report the usual (p - y)^2; the sum over both classes is twice that
         "brier": brier / 2 if question.type == "noul" else brier,
-        "ece": _ece(conf, correct),
+        "ece": ece(conf, correct),
         "act_rate": verdicts["act"] / n,
         "act_accuracy": statistics.fmean(acted) if acted else None,
         "review_rate": verdicts["review"] / n,

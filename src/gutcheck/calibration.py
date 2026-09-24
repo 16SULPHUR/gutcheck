@@ -1,4 +1,5 @@
 import math
+import statistics
 from collections.abc import Sequence
 from typing import Any
 
@@ -63,3 +64,15 @@ def fit_temperature(samples: Sequence[tuple[Sequence[float], int]]) -> float:
     if not samples:
         return 1.0
     return min(_GRID, key=lambda t: nll(samples, t))
+
+
+def ece(conf: Sequence[float], correct: Sequence[bool], bins: int = 10) -> float:
+    """Expected calibration error over equal-width confidence bins."""
+    total, err = len(conf), 0.0
+    for b in range(bins):
+        lo, hi = b / bins, (b + 1) / bins
+        idx = [i for i, c in enumerate(conf) if (lo <= c <= hi if b == 0 else lo < c <= hi)]
+        if idx:
+            gap = statistics.fmean(conf[i] for i in idx) - statistics.fmean(correct[i] for i in idx)
+            err += len(idx) / total * abs(gap)
+    return err

@@ -174,6 +174,9 @@ def test_log_failure_does_not_fail_the_decision(engine):
         def record(self, rec):
             raise OSError("disk full")
 
+        def temperatures(self):
+            return {}
+
         def close(self):
             pass
 

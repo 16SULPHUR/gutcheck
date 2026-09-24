@@ -36,6 +36,11 @@ def test_decide_with_real_laya(tmp_path):
     with TestClient(create_app(settings)) as client:
         assert client.get("/healthz").json()["engine"]["loaded"] == ["english"]
         r = client.post("/v1/decide", json={"state": state, "questions": questions})
+        feedback = client.post(
+            "/v1/feedback",
+            json={"trace_id": r.json()["trace_id"], "answers": {"refund": {"answer": True}}},
+        )
+        metrics = client.get("/metrics").text
 
     assert r.status_code == 200, r.text
     body = r.json()
@@ -46,3 +51,5 @@ def test_decide_with_real_laya(tmp_path):
     choice = body["answers"]["department"]
     assert choice["choice"] in {"billing", "technical"}
     assert sum(choice["probabilities"].values()) == pytest.approx(1.0, abs=1e-3)
+    assert feedback.status_code == 200, feedback.text
+    assert 'gutcheck_decisions_total{endpoint="decide",model="english"} 1.0' in metrics

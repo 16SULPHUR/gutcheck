@@ -68,3 +68,29 @@ def test_eval_writes_outputs_and_checks(tmp_path, monkeypatch, capsys):
 def test_eval_unknown_pack(capsys):
     assert main(["eval", "nope"]) == 2
     assert "unknown pack" in capsys.readouterr().err
+
+
+def test_calibrate_command(tmp_path, capsys):
+    db = str(tmp_path / "g.db")
+    assert main(["calibrate", "--config", str(_config(tmp_path, db))]) == 0
+    assert "No labelled answers" in capsys.readouterr().out
+
+    from gutcheck.store import DecisionStore, FeedbackRecord
+    from tests.test_feedback import _log
+
+    store = DecisionStore(db)
+    for i in range(12):
+        _log(store, i, [0.1, 0.9])
+        store.add_feedback([FeedbackRecord(f"t{i}", "q", 1, True)])
+    store.close()
+    assert main(["calibrate", "--config", str(_config(tmp_path, db)), "--min-samples", "10"]) == 0
+    out = capsys.readouterr().out
+    assert "q: 12 labels, accuracy 1.000" in out
+    assert main(["calibrate", "--config", str(_config(tmp_path, db)), "--min-samples", "20"]) == 0
+    assert "needs 20; unchanged" in capsys.readouterr().out
+
+
+def _config(tmp_path, db):
+    cfg = tmp_path / "gutcheck.yaml"
+    cfg.write_text(f"store:\n  path: {db}\n")
+    return cfg

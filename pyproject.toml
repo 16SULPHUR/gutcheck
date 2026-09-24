@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.6",
     "pydantic-settings[yaml]>=2.3",
     "laya>=0.3.10,<0.4",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]
