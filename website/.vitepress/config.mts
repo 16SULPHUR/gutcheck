@@ -5,10 +5,10 @@ const repo = 'https://github.com/16SULPHUR/gutcheck'
 export default defineConfig({
   title: 'gutcheck',
   description: 'The open-source decision gateway for AI agents and apps.',
-  base: '/gutcheck/',
+  base: process.env.SITE_BASE ?? '/',
   cleanUrls: true,
   appearance: 'dark',
-  head: [['link', { rel: 'icon', href: '/gutcheck/logo.svg' }]],
+  head: [['link', { rel: 'icon', href: '/logo.svg' }]],
   themeConfig: {
     logo: '/logo.svg',
     nav: [

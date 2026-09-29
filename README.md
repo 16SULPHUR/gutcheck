@@ -11,7 +11,7 @@ each with a verdict on whether it is safe to act on.
    └─ needs_tool               none  0.41   → review
 ```
 
-**Website and docs: https://16sulphur.github.io/gutcheck/**
+**Website and docs:** source in [`website/`](website), deployed on Vercel
 
 > **Status: early development (M3).** The gateway serves Laya decisions with verdicts, ships the
 > first question pack with a published eval, and recalibrates from your feedback. See the
