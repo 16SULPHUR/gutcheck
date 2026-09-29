@@ -6,6 +6,7 @@ import CalibrationLab from './components/CalibrationLab.vue'
 import FeedbackLoop from './components/FeedbackLoop.vue'
 import EvalCompare from './components/EvalCompare.vue'
 import PackExplorer from './components/PackExplorer.vue'
+import Community from './components/Community.vue'
 import './custom.css'
 
 export default {
@@ -17,5 +18,6 @@ export default {
     app.component('FeedbackLoop', FeedbackLoop)
     app.component('EvalCompare', EvalCompare)
     app.component('PackExplorer', PackExplorer)
+    app.component('Community', Community)
   },
 } satisfies Theme
