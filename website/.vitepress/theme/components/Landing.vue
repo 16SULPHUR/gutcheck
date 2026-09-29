@@ -2,7 +2,6 @@
 import { withBase } from 'vitepress'
 import Playground from './Playground.vue'
 import EvalCompare from './EvalCompare.vue'
-import Community from './Community.vue'
 
 const features = [
   { t: 'Verdicts, not just probabilities', d: 'Every answer comes back as act, review or escalate, so your code knows what to do with it.' },
@@ -63,12 +62,6 @@ const features = [
       <h2>Measured, not promised</h2>
       <p class="sub">The bundled prompt-guard pack, before and after fine-tuning, on test rows the model never saw.</p>
       <EvalCompare />
-    </section>
-
-    <section>
-      <h2>Community</h2>
-      <p class="sub">gutcheck is built in the open. Star it, try it, send a pull request.</p>
-      <Community />
     </section>
 
     <section class="final">
