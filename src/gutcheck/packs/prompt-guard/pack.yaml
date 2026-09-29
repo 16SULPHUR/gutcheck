@@ -1,8 +1,13 @@
 id: prompt-guard
-version: 1
+version: 2
 description: >-
   Screens text sent to an LLM for prompt injection and jailbreak attempts. Use it as one layer of
   defence, not the only one: attackers adapt, and these checks can be fooled.
+
+# fine-tuned from Laya english with `gutcheck finetune` (training/prompt_guard_kaggle.ipynb)
+model:
+  repo: 16sulphur/laya-prompt-guard
+  revision: 1c36ead5ccca7568fd105b3b0772dc5171a56bd0
 
 questions:
   injection:
@@ -19,6 +24,13 @@ questions:
         path: data/test-00000-of-00001-701d16158af87368.parquet
         license: Apache-2.0
       calibration:
+        repo: 16sulphur/laya-prompt-guard
+        repo_type: model
+        revision: 1c36ead5ccca7568fd105b3b0772dc5171a56bd0
+        path: heldout/injection.jsonl
+        license: Apache-2.0
+      calibration_max_rows: null
+      train:
         repo: deepset/prompt-injections
         revision: 4f61ecb038e9c3fb77e21034b22511b523772cdd
         path: data/train-00000-of-00001-9564e8b05b4757ab.parquet
@@ -42,6 +54,13 @@ questions:
         path: default/jailbreak_dataset_test.csv
         license: Apache-2.0
       calibration:
+        repo: 16sulphur/laya-prompt-guard
+        repo_type: model
+        revision: 1c36ead5ccca7568fd105b3b0772dc5171a56bd0
+        path: heldout/jailbreak.jsonl
+        license: Apache-2.0
+      calibration_max_rows: null
+      train:
         repo: jackhhao/jailbreak-classification
         revision: 2f2ceeb39658696fd3f462403562b6eea5306287
         path: default/jailbreak_dataset_train.csv

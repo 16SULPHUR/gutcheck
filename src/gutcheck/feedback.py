@@ -9,9 +9,14 @@ from gutcheck.packs import label_key
 from gutcheck.store import DecisionStore
 
 
-def fingerprint(question: dict[str, Any]) -> str:
-    """Stable key for a question definition: same wording and options, same key."""
+def fingerprint(question: dict[str, Any], checkpoint: str | None = None) -> str:
+    """Stable key for a question definition: same wording and options, same key.
+
+    A pack checkpoint gets its own key, so its answers don't share a temperature with Laya's.
+    """
     core = {k: question.get(k) for k in ("type", "instructions", "criteria", "labels")}
+    if checkpoint:
+        core["checkpoint"] = checkpoint
     digest = hashlib.sha256(json.dumps(core, sort_keys=True, ensure_ascii=False).encode())
     return digest.hexdigest()[:16]
 

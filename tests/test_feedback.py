@@ -11,6 +11,8 @@ def test_fingerprint_ignores_policy_and_order():
     b = {"instructions": "Urgent?", "type": "noul"}
     assert fingerprint(a) == fingerprint(b)
     assert fingerprint(a) != fingerprint({**b, "instructions": "Urgent now?"})
+    assert fingerprint(a, "prompt-guard@2") != fingerprint(a)
+    assert fingerprint(a, "prompt-guard@2") == fingerprint(b, "prompt-guard@2")
 
 
 def test_options():

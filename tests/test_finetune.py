@@ -33,13 +33,14 @@ def test_local_pack_points_at_the_checkpoint(tmp_path):
         )
     _write_local_pack(pack, tmp_path)
     local = Pack.load(tmp_path / "pack" / "prompt-guard")
-    assert local.version == 2
-    assert local.checkpoint == "prompt-guard@2"
+    assert local.version == pack.version + 1
+    assert local.checkpoint == f"prompt-guard@{pack.version + 1}"
     assert local.model_source() == str(tmp_path / "pack" / "prompt-guard" / "../..")
     ev = local.questions["injection"].eval
     assert ev.test == pack.questions["injection"].eval.test
     assert ev.calibration.path == "../../heldout/injection.jsonl"
     assert ev.calibration_max_rows is None
+    assert ev.train == pack.questions["injection"].eval.train
     raw = yaml.safe_load((tmp_path / "pack" / "prompt-guard" / "pack.yaml").read_text())
     assert raw["questions"]["jailbreak"]["instructions"] == pack.questions["jailbreak"].instructions
 

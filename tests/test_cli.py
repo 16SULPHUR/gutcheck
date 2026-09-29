@@ -39,7 +39,7 @@ def test_serve_passes_overrides_to_uvicorn(monkeypatch):
 def test_packs_lists_bundled_packs(capsys):
     assert main(["packs"]) == 0
     out = capsys.readouterr().out
-    assert "prompt-guard@1" in out
+    assert "prompt-guard@2" in out
     assert "prompt-guard.injection [noul]" in out
 
 

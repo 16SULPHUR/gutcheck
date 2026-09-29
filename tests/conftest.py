@@ -66,12 +66,16 @@ def agents():
 
 
 @pytest.fixture
-def engine(agents):
+def engine(agents, monkeypatch):
+    import huggingface_hub
+
     router = Router()
     for name, agent in agents.items():
         router.attach(name, agent)
+    # bundled packs with their own checkpoint are answered by the fake english agent
+    monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda *a, **k: "unused")
     settings = load_settings()
-    return LayaEngine(settings.engine, router=router)
+    return LayaEngine(settings.engine, router=router, agent_factory=lambda p, s: agents["english"])
 
 
 @pytest.fixture
