@@ -37,4 +37,4 @@ Set stricter thresholds where a wrong automatic action is expensive (refunds, de
 
 Thresholds only mean something on calibrated probabilities. Uncalibrated, "0.9" may be right 60% of the time. See [Calibration](/docs/concepts/calibration), then pick `act_at` from your own eval: the accuracy of answers marked `act` is reported for every pack in its `EVAL.md`.
 
-The [playground](/demos/#decision-playground) lets you move thresholds and watch verdicts change.
+The [live demo](/demos/) lets you move thresholds and watch real verdicts change.
