@@ -150,12 +150,48 @@ offline; a running server picks its results up on restart.
 ### Metrics and dashboard
 
 `GET /metrics` serves Prometheus metrics: `gutcheck_decisions_total`,
-`gutcheck_inference_seconds`, `gutcheck_verdicts_total` and `gutcheck_feedback_total`. Pack
-questions are labelled by name; inline questions share the label `inline`.
+`gutcheck_inference_seconds`, `gutcheck_verdicts_total`, `gutcheck_feedback_total` and, with
+escalation on, `gutcheck_escalations_total` and `gutcheck_escalation_seconds`. Pack questions are
+labelled by name; inline questions share the label `inline`.
 
 `GET /dashboard` is a built-in page showing traffic, latency, the verdict mix, and per-question
 accuracy from feedback over the last day, week or month. It reads `GET /v1/stats`, which you can
 also query directly.
+
+## Escalation
+
+When Laya isn't sure, gutcheck can ask a bigger model. Point it at any OpenAI-compatible chat
+endpoint (OpenAI, Ollama, vLLM, LM Studio). It is off by default, and only `/v1/decide` uses it.
+
+```yaml
+escalation:
+  mode: shadow                        # off | shadow | live
+  base_url: http://localhost:11434/v1 # Ollama; any /chat/completions server works
+  model: llama3.2
+  api_key: null                       # sent as a bearer token when set
+  verdicts: [escalate]                # which verdicts trigger a second opinion; add `review` too
+  timeout: 30
+```
+
+| Mode | What happens |
+| --- | --- |
+| `shadow` | The response is unchanged and returns at Laya's speed. The LLM is asked in the background and its answer is logged, so you can measure it before trusting it. |
+| `live` | The response waits for the LLM and each asked answer gets an `escalation` object. |
+
+Laya's probabilities and verdict are never changed. An asked answer carries
+`escalation: {model, answer, agrees, latency_ms}` in live mode, or `{model, error, latency_ms}`
+when the LLM was down or replied with no valid option (only the error's type is returned; the
+details go to the log). Read `escalation.answer` when it is there and Laya's answer otherwise.
+The LLM's answer has no probability: nothing calibrates it.
+
+Shadow mode is how to decide whether to go live. `GET /v1/stats` reports, per question, how many
+answers were asked, how often the LLM agreed with Laya, and, once you send
+[feedback](#post-v1feedback), how often each of them was right.
+
+The text being classified goes to the LLM, inside `<input>` tags with an instruction not to follow
+it. That doesn't make it injection-proof. For security questions such as prompt-guard, an attacker
+controls the text the LLM reads, so prefer shadow mode, or treat a live `false` from the LLM as
+one signal rather than a release.
 
 ## Question packs
 
@@ -258,6 +294,10 @@ example `GUTCHECK_ENGINE__DEVICE=cuda`. See [`gutcheck.example.yaml`](gutcheck.e
 | `store.save_state`  | `true`                      | Keep the input text in the log                       |
 | `packs.dirs`        | `[]`                        | Extra directories to load question packs from        |
 | `calibration.min_samples` | `30`                  | Labels a question needs before feedback recalibrates it |
+| `escalation.mode`   | `off`                       | `off`, `shadow` or `live`; see [Escalation](#escalation) |
+| `escalation.base_url` | `http://localhost:11434/v1` | OpenAI-compatible endpoint for second opinions     |
+| `escalation.model`  | none                        | Model to ask (required unless `mode` is `off`)       |
+| `escalation.verdicts` | `[escalate]`              | Verdicts that get a second opinion                   |
 
 `gutcheck config` prints the resolved configuration.
 

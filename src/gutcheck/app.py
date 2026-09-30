@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import logging
 import secrets
 import time
@@ -19,12 +20,19 @@ from gutcheck import __version__
 from gutcheck.calibration import apply_temperature, distribution
 from gutcheck.config import Settings, Thresholds, load_settings
 from gutcheck.engine import Engine, LayaEngine
+from gutcheck.escalation import ChatClient, OpenAIChat, SecondOpinion, ask, laya_choice
 from gutcheck.feedback import fingerprint, options, recalibrate, resolve
 from gutcheck.metrics import Metrics
 from gutcheck.packs import Pack, PackError, load_packs
 from gutcheck.packs import resolve as resolve_pack
 from gutcheck.policy import answer_probability, verdict
-from gutcheck.store import AnswerRecord, DecisionRecord, DecisionStore, FeedbackRecord
+from gutcheck.store import (
+    AnswerRecord,
+    DecisionRecord,
+    DecisionStore,
+    FeedbackRecord,
+    SecondOpinionRecord,
+)
 
 TRACE_HEADER = "X-Gutcheck-Trace-Id"
 
@@ -205,6 +213,7 @@ def create_app(
     engine: Engine | None = None,
     store: DecisionStore | None = None,
     packs: dict[str, Pack] | None = None,
+    chat: ChatClient | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     packs = packs if packs is not None else load_packs(settings.packs.dirs)
@@ -215,6 +224,12 @@ def create_app(
                 p.checkpoint, p.model_source(), p.model.revision, p.model.subfolder
             )
     metrics = Metrics()
+    esc = settings.escalation
+    if esc.mode != "off":
+        chat = chat or OpenAIChat(esc)
+    # blocking HTTP calls to the escalation LLM, off the event loop and off the inference thread
+    llm_pool: ThreadPoolExecutor | None = None
+    shadow_tasks: set[asyncio.Task] = set()
     pack_questions = {f"{p.id}.{qid}" for p in packs.values() for qid in p.questions}
     # temperatures fitted from feedback, by question fingerprint; they override pack calibration
     learned: dict[str, float] = {}
@@ -223,15 +238,21 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal store, pool
+        nonlocal store, pool, llm_pool
         owns_store = store is None and bool(settings.store.path)
         if owns_store:
             store = DecisionStore(settings.store.path, settings.store.save_state)
         if store is not None:
             learned.update(store.temperatures())
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gutcheck-infer")
+        if esc.mode != "off":
+            llm_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="gutcheck-llm")
         engine.start()
         yield
+        for task in shadow_tasks:
+            task.cancel()
+        if llm_pool is not None:
+            llm_pool.shutdown(wait=False, cancel_futures=True)
         pool.shutdown(wait=True)
         engine.close()
         if owns_store:
@@ -320,6 +341,40 @@ def create_app(
                 log.exception("could not log decision %s", trace_id)
         return Outcome(trace_id, result, checkpoints, probabilities, verdicts, latency_ms)
 
+    async def second_opinions(
+        trace_id: str, state: State, questions: dict[str, dict[str, Any]], out: Outcome
+    ) -> dict[str, SecondOpinion]:
+        """Ask the escalation LLM about the answers whose verdict is in `escalation.on`."""
+        assert chat is not None and out.verdicts is not None
+        loop = asyncio.get_running_loop()
+        answers = out.result.get("answers", {})
+        jobs = []
+        for qid, v in out.verdicts.items():
+            if v not in esc.verdicts:
+                continue
+            opts, laya = laya_choice(answers[qid])
+            job = functools.partial(ask, chat, state, qid, questions[qid], opts, laya)
+            jobs.append(loop.run_in_executor(llm_pool, job))
+        opinions = {o.question_id: o for o in await asyncio.gather(*jobs)}
+        for qid, o in opinions.items():
+            outcome = "error" if o.error else ("agree" if o.agrees else "disagree")
+            metrics.escalations.labels(metric_label(qid), outcome).inc()
+            metrics.escalation_seconds.observe(o.latency_ms / 1000)
+            if o.error:
+                log.warning("escalation failed for %s on %s: %s", qid, trace_id, o.error)
+        if store is not None and opinions:
+            records = [
+                SecondOpinionRecord(o.question_id, o.answer, o.agrees, o.latency_ms, o.error)
+                for o in opinions.values()
+            ]
+            try:
+                await loop.run_in_executor(
+                    None, store.record_second_opinions, trace_id, esc.mode, chat.model, records
+                )
+            except Exception:
+                log.exception("could not log second opinions for %s", trace_id)
+        return opinions
+
     async def run(*args: Any) -> Outcome:
         try:
             return await asyncio.get_running_loop().run_in_executor(pool, infer, *args)
@@ -378,6 +433,13 @@ def create_app(
             "decide", req.state, questions, req.model, thresholds, temperatures, checkpoints
         )
         response.headers[TRACE_HEADER] = out.trace_id
+        opinions: dict[str, SecondOpinion] = {}
+        if esc.mode == "live":
+            opinions = await second_opinions(out.trace_id, req.state, questions, out)
+        elif esc.mode == "shadow":
+            task = asyncio.create_task(second_opinions(out.trace_id, req.state, questions, out))
+            shadow_tasks.add(task)
+            task.add_done_callback(shadow_tasks.discard)
         routing = out.result.get("routing")
         answers = {
             qid: {
@@ -385,6 +447,7 @@ def create_app(
                 "answer_probability": round(out.probabilities[qid], 4),
                 "verdict": out.verdicts[qid],
                 **({"model": out.checkpoints[qid]} if qid in out.checkpoints else {}),
+                **({"escalation": opinions[qid].public(chat.model)} if qid in opinions else {}),
             }
             for qid, a in out.result.get("answers", {}).items()
         }
@@ -471,6 +534,19 @@ def create_app(
             q = per_q.setdefault(key, {"answers": 0, "verdicts": {}})
             q["feedback"] = n
             q["accuracy"] = round(n_correct / n, 4)
+        for key, asked, agree, disagree, errors in raw["escalated"]:
+            q = per_q.setdefault(key, {"answers": 0, "verdicts": {}})
+            q["escalation"] = {
+                "asked": asked,
+                "agree": agree or 0,
+                "disagree": disagree or 0,
+                "errors": errors or 0,
+            }
+        for key, opts, probs, second, label in raw["escalated_labelled"]:
+            e = per_q[key]["escalation"]
+            e["labelled"] = e.get("labelled", 0) + 1
+            e["laya_correct"] = e.get("laya_correct", 0) + (probs.index(max(probs)) == label)
+            e["llm_correct"] = e.get("llm_correct", 0) + (opts[label] == second)
         questions = []
         for key, q in per_q.items():
             d = described.get(key, {})
@@ -485,6 +561,7 @@ def create_app(
                     "feedback": q.get("feedback", 0),
                     "accuracy": q.get("accuracy"),
                     "temperature": learned.get(key),
+                    "escalation": q.get("escalation"),
                 }
             )
         questions.sort(key=lambda q: -q["answers"])
