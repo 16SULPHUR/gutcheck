@@ -47,7 +47,7 @@ Unknown fields are rejected.
 }
 ```
 
-The numbers are illustrative. `answer_probability` is the probability of the returned answer, after calibration, and is what the [verdict](/docs/concepts/verdicts) is computed from. Pack answers are keyed `<pack>.<question>`.
+The values above show the response shape. `answer_probability` is the probability of the returned answer, after calibration, and is what the [verdict](/docs/concepts/verdicts) is computed from. Pack answers are keyed `<pack>.<question>`.
 
 The `X-Gutcheck-Trace-Id` header carries the same `trace_id`. Use it with [`/v1/feedback`](/docs/reference/feedback).
 

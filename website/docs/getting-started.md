@@ -83,4 +83,4 @@ client.system_one(
 
 - [How it works](/docs/concepts/how-it-works) for the request path and the moving parts.
 - [Verdicts and policies](/docs/concepts/verdicts) to tune what counts as safe to act on.
-- [Try the demos](/demos/) to see verdicts and calibration interactively.
+- [Try the demos](/demos/) and run the real model on your own text.
