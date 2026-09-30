@@ -32,3 +32,15 @@ class Metrics:
             ["question", "correct"],
             registry=self.registry,
         )
+        self.escalations = Counter(
+            "gutcheck_escalations",
+            "Second opinions from the escalation LLM",
+            ["question", "outcome"],
+            registry=self.registry,
+        )
+        self.escalation_seconds = Histogram(
+            "gutcheck_escalation_seconds",
+            "Escalation LLM time per question",
+            buckets=(0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
+            registry=self.registry,
+        )

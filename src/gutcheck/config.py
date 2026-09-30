@@ -3,7 +3,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -57,6 +57,33 @@ class CalibrationSettings(BaseModel):
     min_samples: int = Field(30, ge=2)
 
 
+class EscalationSettings(BaseModel):
+    """Second opinion from an OpenAI-compatible LLM for answers Laya is unsure about."""
+
+    model_config = {"extra": "forbid"}
+
+    # off; shadow: ask in the background and only log; live: use the answer in the response
+    mode: Literal["off", "shadow", "live"] = "off"
+    base_url: str = "http://localhost:11434/v1"
+    api_key: SecretStr | None = None
+    model: str | None = None
+    # verdicts that trigger a second opinion
+    verdicts: list[Literal["review", "escalate"]] = ["escalate"]
+    timeout: float = Field(30, gt=0)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _yaml_off(cls, v: object) -> object:
+        # YAML 1.1 reads an unquoted `off` as false
+        return "off" if v is False else v
+
+    @model_validator(mode="after")
+    def _model_set(self) -> "EscalationSettings":
+        if self.mode != "off" and not self.model:
+            raise ValueError("escalation.model is required when escalation.mode is not off")
+        return self
+
+
 class PackSettings(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -80,6 +107,7 @@ class Settings(BaseSettings):
     store: StoreSettings = StoreSettings()
     packs: PackSettings = PackSettings()
     calibration: CalibrationSettings = CalibrationSettings()
+    escalation: EscalationSettings = EscalationSettings()
 
     @classmethod
     def settings_customise_sources(

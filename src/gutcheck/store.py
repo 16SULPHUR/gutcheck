@@ -53,6 +53,13 @@ _ANSWER_COLUMNS = {
     # the model's probabilities before any temperature was applied
     "raw": "TEXT",
     "temperature": "REAL",
+    # the escalation LLM's second opinion (live or shadow), if one was asked for
+    "second_mode": "TEXT",
+    "second_model": "TEXT",
+    "second_answer": "TEXT",
+    "second_agrees": "INTEGER",
+    "second_latency_ms": "REAL",
+    "second_error": "TEXT",
 }
 
 
@@ -71,6 +78,15 @@ class AnswerRecord:
     options: list[str] | None = None
     raw: list[float] | None = None
     temperature: float = 1.0
+
+
+@dataclass
+class SecondOpinionRecord:
+    question_id: str
+    answer: str | None
+    agrees: bool | None
+    latency_ms: float
+    error: str | None = None
 
 
 @dataclass
@@ -152,6 +168,30 @@ class DecisionStore:
                 "INSERT INTO answers (trace_id, question_id, type, question, answer,"
                 " answer_probability, verdict, calibration_key, options, raw, temperature)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+
+    def record_second_opinions(
+        self, trace_id: str, mode: str, model: str, opinions: list[SecondOpinionRecord]
+    ) -> None:
+        rows = [
+            (
+                mode,
+                model,
+                o.answer,
+                None if o.agrees is None else int(o.agrees),
+                o.latency_ms,
+                o.error,
+                trace_id,
+                o.question_id,
+            )
+            for o in opinions
+        ]
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "UPDATE answers SET second_mode = ?, second_model = ?, second_answer = ?,"
+                " second_agrees = ?, second_latency_ms = ?, second_error = ?"
+                " WHERE trace_id = ? AND question_id = ?",
                 rows,
             )
 
@@ -238,11 +278,35 @@ class DecisionStore:
             " WHERE d.created_at >= ? GROUP BY 1",
             (since,),
         )
+        escalated = self.execute(
+            "SELECT a.calibration_key, COUNT(*), SUM(a.second_agrees = 1),"
+            " SUM(a.second_agrees = 0), SUM(a.second_error IS NOT NULL) FROM answers a"
+            " JOIN decisions d USING (trace_id)"
+            " WHERE d.created_at >= ? AND a.second_model IS NOT NULL"
+            " AND a.calibration_key IS NOT NULL GROUP BY 1",
+            (since,),
+        )
+        # escalated answers that also got a true label: who was right, Laya or the LLM
+        escalated_labelled = [
+            (key, json.loads(options), json.loads(raw), second, label)
+            for key, options, raw, second, label in self.execute(
+                "SELECT a.calibration_key, a.options, a.raw, a.second_answer, f.label"
+                " FROM answers a JOIN decisions d USING (trace_id)"
+                " JOIN feedback f ON f.id = (SELECT MAX(id) FROM feedback"
+                "   WHERE trace_id = a.trace_id AND question_id = a.question_id)"
+                " WHERE d.created_at >= ? AND a.second_answer IS NOT NULL"
+                " AND a.options IS NOT NULL AND a.raw IS NOT NULL AND f.label IS NOT NULL"
+                " AND a.calibration_key IS NOT NULL",
+                (since,),
+            )
+        ]
         return {
             "per_hour": per_hour,
             "latencies": latencies,
             "per_question": per_question,
             "labelled": labelled,
+            "escalated": escalated,
+            "escalated_labelled": escalated_labelled,
         }
 
     def temperatures(self) -> dict[str, float]:
