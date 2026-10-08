@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { withBase } from 'vitepress'
-import Playground from './Playground.vue'
+import LiveDemo from './LiveDemo.vue'
 import EvalCompare from './EvalCompare.vue'
 
 const features = [
@@ -38,8 +38,8 @@ const features = [
 
     <section>
       <h2>Try it</h2>
-      <p class="sub">Pick a scenario and move the thresholds. This is the real response shape of <code>/v1/decide</code>.</p>
-      <Playground />
+      <p class="sub">Type your own text. This calls the real model on a live gutcheck server.</p>
+      <LiveDemo />
     </section>
 
     <section>

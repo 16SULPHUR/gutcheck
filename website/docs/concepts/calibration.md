@@ -12,7 +12,7 @@ gutcheck fits one temperature `T` per question. Logits are divided by `T` before
 
 The fit tries 81 values between 0.05 and 20 and keeps the one with the lowest negative log-likelihood on labelled data, which punishes confident mistakes hard.
 
-Try it in the [calibration lab](/demos/#calibration-lab).
+Compare raw and calibrated confidence on the [live demo](/demos/).
 
 ## Where temperatures come from
 
